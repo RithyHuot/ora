@@ -39,6 +39,7 @@ type ProfileOptions struct {
 	NodeBinDirs       []string                 // dirnames the provider binary needs read access to (unresolved + resolved); may be nil
 	HomebrewRoots     []string                 // /opt/homebrew, /usr/local — only existing
 	VersionMgrDirs    []string                 // ~/.nvm, ~/.fnm, ~/.asdf, ~/.volta — only existing
+	XcodeReadSubpath  string                   // optional extra read-only subpath for the xcode-select developer install (e.g. /Applications/Xcode.app); "" when CLT is sufficient. Use sandbox.DetectXcodeReadSubpath to compute.
 	AllowUnixSockets  []string                 // absolute paths; empty = block all UDS
 	ExtraDenyLiterals []string                 // absolute literal paths to add to mandatory deny (e.g. resolved RIPGREP_CONFIG_PATH)
 	Logger            *slog.Logger             // receives internal warnings during profile generation; nil uses slog.Default()
@@ -112,6 +113,11 @@ func validateProfileOptions(o *ProfileOptions) error {
 	for _, p := range o.NodeBinDirs {
 		if err := validatePath(p); err != nil {
 			return fmt.Errorf("invalid NodeBinDirs path: %w", err)
+		}
+	}
+	if o.XcodeReadSubpath != "" {
+		if err := validatePath(o.XcodeReadSubpath); err != nil {
+			return fmt.Errorf("invalid XcodeReadSubpath: %w", err)
 		}
 	}
 	return nil
@@ -268,6 +274,32 @@ func emitPathAllows(b *strings.Builder, o ProfileOptions) error {
 		line(fmt.Sprintf(`(allow file-read* (subpath %s))`, lit(p)))
 	}
 	line("")
+	line("; xcode-select developer-dir resolution. /usr/bin/git is a libxcselect")
+	line("; shim that reads these symlinks before exec'ing the real git. Without")
+	line("; read access it concludes 'no developer tools' and triggers the macOS")
+	line("; install dialog every run, even after the user installs Command Line")
+	line("; Tools, because the underlying access denial does not change. Both the")
+	line("; /var/... and /private/var/... forms are emitted because seatbelt")
+	line("; matches on the path supplied to the syscall, not the firmlink-")
+	line("; resolved canonical, and the libxcselect walk uses both spellings.")
+	for _, p := range []string{
+		"/var", "/var/select", "/var/select/developer_dir",
+		"/var/db", "/var/db/xcode_select_link",
+		"/private/var/select", "/private/var/select/developer_dir",
+		"/private/var/db", "/private/var/db/xcode_select_link",
+	} {
+		line(fmt.Sprintf(`(allow file-read* (literal %s))`, lit(p)))
+	}
+	if o.XcodeReadSubpath != "" {
+		line("")
+		line("; Active xcode-select developer dir (Xcode-only setup; CLT absent).")
+		line("; Caller resolves via sandbox.DetectXcodeReadSubpath. Granted as a")
+		line("; subpath because Xcode tools dlopen DVT* frameworks at sibling")
+		line("; <bundle>/Contents/{Frameworks,SharedFrameworks} paths outside")
+		line("; <bundle>/Contents/Developer.")
+		line(fmt.Sprintf(`(allow file-read* (subpath %s))`, lit(filepath.Clean(o.XcodeReadSubpath))))
+	}
+	line("")
 	if len(o.HomebrewRoots) > 0 {
 		line("; Homebrew (existing roots)")
 		for _, p := range o.HomebrewRoots {
@@ -325,6 +357,9 @@ func emitPathAllows(b *strings.Builder, o ProfileOptions) error {
 	emitted := map[string]struct{}{}
 	roots := []string{o.HomeDir, keychainDir}
 	roots = append(roots, o.WritablePaths...)
+	if o.XcodeReadSubpath != "" {
+		roots = append(roots, filepath.Clean(o.XcodeReadSubpath))
+	}
 	for _, anc := range ancestorLiterals(roots) {
 		line(fmt.Sprintf(`(allow file-read* (literal %s))`, lit(anc)))
 		emitted[anc] = struct{}{}

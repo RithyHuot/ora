@@ -744,3 +744,149 @@ func TestDetectGitCommonDir_DanglingSymlinkRejected(t *testing.T) {
 		t.Error("expected non-empty unresolved path for ENOENT case")
 	}
 }
+
+func TestDetectActiveDeveloperDir_PrefersFirstReadableLink(t *testing.T) {
+	tmp := t.TempDir()
+	target := filepath.Join(tmp, "Developer")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	primary := filepath.Join(tmp, "primary_link")
+	secondary := filepath.Join(tmp, "secondary_link")
+	if err := os.Symlink(target, primary); err != nil {
+		t.Fatal(err)
+	}
+	otherTarget := filepath.Join(tmp, "OtherDeveloper")
+	if err := os.Mkdir(otherTarget, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(otherTarget, secondary); err != nil {
+		t.Fatal(err)
+	}
+
+	got := detectActiveDeveloperDirAt(nil, []string{primary, secondary})
+	if got != target {
+		t.Errorf("expected primary target %q, got %q", target, got)
+	}
+}
+
+func TestDetectActiveDeveloperDir_FallsBackWhenFirstMissing(t *testing.T) {
+	tmp := t.TempDir()
+	target := filepath.Join(tmp, "Developer")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	missing := filepath.Join(tmp, "no_such_link")
+	secondary := filepath.Join(tmp, "secondary_link")
+	if err := os.Symlink(target, secondary); err != nil {
+		t.Fatal(err)
+	}
+
+	got := detectActiveDeveloperDirAt(nil, []string{missing, secondary})
+	if got != target {
+		t.Errorf("expected fallback target %q, got %q", target, got)
+	}
+}
+
+func TestDetectActiveDeveloperDir_SkipsLinksWithMissingTargets(t *testing.T) {
+	tmp := t.TempDir()
+	dangling := filepath.Join(tmp, "dangling_link")
+	if err := os.Symlink(filepath.Join(tmp, "ghost"), dangling); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(tmp, "Developer")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	good := filepath.Join(tmp, "good_link")
+	if err := os.Symlink(target, good); err != nil {
+		t.Fatal(err)
+	}
+
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, nil))
+	got := detectActiveDeveloperDirAt(logger, []string{dangling, good})
+	if got != target {
+		t.Errorf("expected good target %q, got %q", target, got)
+	}
+	if !strings.Contains(buf.String(), "target missing") {
+		t.Errorf("expected warning for dangling link; logger output: %s", buf.String())
+	}
+}
+
+func TestDetectActiveDeveloperDir_NoLinksReturnsEmpty(t *testing.T) {
+	tmp := t.TempDir()
+	got := detectActiveDeveloperDirAt(nil, []string{filepath.Join(tmp, "missing-1"), filepath.Join(tmp, "missing-2")})
+	if got != "" {
+		t.Errorf("expected empty string when no link readable, got %q", got)
+	}
+}
+
+func TestDetectXcodeReadSubpath_NoActiveDevDir(t *testing.T) {
+	got := detectXcodeReadSubpath(nil, "", false)
+	if got != "" {
+		t.Errorf("expected empty result with no active dev dir, got %q", got)
+	}
+}
+
+func TestDetectXcodeReadSubpath_ActiveDevDirInsideCLT(t *testing.T) {
+	for _, p := range []string{
+		"/Library/Developer/CommandLineTools",
+		"/Library/Developer/CommandLineTools/",
+		"/Library/Developer/CommandLineTools/usr/bin",
+	} {
+		got := detectXcodeReadSubpath(nil, p, false)
+		if got != "" {
+			t.Errorf("expected empty result when dev dir is inside CLT (%q), got %q", p, got)
+		}
+	}
+}
+
+func TestDetectXcodeReadSubpath_XcodeAndCLTBothPresent_DefersToCLT(t *testing.T) {
+	got := detectXcodeReadSubpath(nil, "/Applications/Xcode.app/Contents/Developer", true)
+	if got != "" {
+		t.Errorf("expected empty result when CLT is present (xcselect falls back cleanly), got %q", got)
+	}
+}
+
+func TestDetectXcodeReadSubpath_XcodeOnly_ReturnsAppRoot(t *testing.T) {
+	for _, in := range []string{
+		"/Applications/Xcode.app/Contents/Developer",
+		"/Applications/Xcode-15.app/Contents/Developer",
+		"/Applications/Xcode-beta.app/Contents/Developer",
+	} {
+		got := detectXcodeReadSubpath(nil, in, false)
+		want := strings.TrimSuffix(in, "/Contents/Developer")
+		if got != want {
+			t.Errorf("dev dir %q → got %q, want %q (.app bundle root)", in, got, want)
+		}
+	}
+}
+
+func TestDetectXcodeReadSubpath_UnrecognizedLayoutReturnsAsIs(t *testing.T) {
+	got := detectXcodeReadSubpath(nil, "/opt/Xcode/Toolchains/Default/Developer", false)
+	if got != "/opt/Xcode/Toolchains/Default/Developer" {
+		t.Errorf("expected dev dir to be returned unchanged for unrecognized layout, got %q", got)
+	}
+}
+
+func TestDetectActiveDeveloperDir_RelativeTargetResolvedFromLinkDir(t *testing.T) {
+	tmp := t.TempDir()
+	subdir := filepath.Join(tmp, "sub")
+	if err := os.Mkdir(subdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(subdir, "rel_target")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(subdir, "link")
+	if err := os.Symlink("rel_target", link); err != nil {
+		t.Fatal(err)
+	}
+
+	got := detectActiveDeveloperDirAt(nil, []string{link})
+	if got != filepath.Clean(target) {
+		t.Errorf("expected relative-resolved target %q, got %q", target, got)
+	}
+}

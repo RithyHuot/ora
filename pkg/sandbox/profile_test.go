@@ -770,3 +770,79 @@ func TestGenerateProfile_AuthDirEntryFileUsesLiteral(t *testing.T) {
 		t.Errorf("dir path should be subpath-granted, got:\n%s", out)
 	}
 }
+
+// xcodeSelectLinkLiterals is the set of literal allows that must always
+// appear in the profile so the libxcselect shim in /usr/bin/git can
+// resolve the active developer dir without triggering the macOS Command
+// Line Tools install dialog. Both /var/... and /private/var/... forms
+// are required because seatbelt matches on the syscall-supplied path
+// rather than the firmlink-resolved canonical.
+var xcodeSelectLinkLiterals = []string{
+	`(allow file-read* (literal "/var"))`,
+	`(allow file-read* (literal "/var/select"))`,
+	`(allow file-read* (literal "/var/select/developer_dir"))`,
+	`(allow file-read* (literal "/var/db"))`,
+	`(allow file-read* (literal "/var/db/xcode_select_link"))`,
+	`(allow file-read* (literal "/private/var/select"))`,
+	`(allow file-read* (literal "/private/var/select/developer_dir"))`,
+	`(allow file-read* (literal "/private/var/db"))`,
+	`(allow file-read* (literal "/private/var/db/xcode_select_link"))`,
+}
+
+func TestGenerateProfile_EmitsXcodeSelectLinkLiterals(t *testing.T) {
+	got, err := GenerateProfile(baseOpts())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range xcodeSelectLinkLiterals {
+		if !strings.Contains(got, want) {
+			t.Errorf("profile missing xcode-select link allow %q — /usr/bin/git will trigger the CLT install dialog under sandbox", want)
+		}
+	}
+}
+
+func TestGenerateProfile_NoXcodeReadSubpath_OmitsExtraSubpath(t *testing.T) {
+	opts := baseOpts()
+	opts.XcodeReadSubpath = ""
+	got, err := GenerateProfile(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(got, "Active xcode-select developer dir") {
+		t.Errorf("profile should not emit xcode read comment when XcodeReadSubpath is empty:\n%s", got)
+	}
+	if strings.Contains(got, `(subpath "/Applications/Xcode.app`) {
+		t.Errorf("profile should not emit Xcode.app subpath when XcodeReadSubpath is empty:\n%s", got)
+	}
+}
+
+func TestGenerateProfile_XcodeReadSubpathSet_EmitsSubpathAndAncestors(t *testing.T) {
+	opts := baseOpts()
+	// Caller-supplied .app root (the form DetectXcodeReadSubpath returns for
+	// an Xcode-only setup). Granting the whole bundle so DVT* frameworks at
+	// /Applications/Xcode.app/Contents/{Frameworks,SharedFrameworks} resolve
+	// when xcselect prefers the Xcode dev dir over CLT.
+	opts.XcodeReadSubpath = "/Applications/Xcode.app"
+	got, err := GenerateProfile(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, `(allow file-read* (subpath "/Applications/Xcode.app"))`) {
+		t.Errorf("profile missing Xcode.app subpath read allow:\n%s", got)
+	}
+	for _, anc := range []string{
+		`(allow file-read* (literal "/Applications"))`,
+	} {
+		if !strings.Contains(got, anc) {
+			t.Errorf("profile missing ancestor literal %q — kernel path walk will fail at the missing component:\n%s", anc, got)
+		}
+	}
+}
+
+func TestGenerateProfile_RejectsRelativeXcodeReadSubpath(t *testing.T) {
+	opts := baseOpts()
+	opts.XcodeReadSubpath = "Applications/Xcode.app"
+	if _, err := GenerateProfile(opts); err == nil {
+		t.Error("expected validation error for non-absolute XcodeReadSubpath")
+	}
+}

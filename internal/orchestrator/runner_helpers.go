@@ -162,6 +162,7 @@ func (r *Runner) buildAndWriteProfile(sess *session.Session, home string, writab
 		NodeBinDirs:       sandbox.DetectNodeBinDir(r.Bin, r.ProviderName, home, r.Logger),
 		HomebrewRoots:     sandbox.DetectHomebrewRoots(r.Logger),
 		VersionMgrDirs:    sandbox.DetectVersionMgrDirs(home, r.Logger),
+		XcodeReadSubpath:  sandbox.DetectXcodeReadSubpath(r.Logger),
 		AllowUnixSockets:  r.Config.AllowUnixSockets,
 		ExtraDenyLiterals: extraDenies,
 		Logger:            r.Logger,
