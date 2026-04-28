@@ -184,13 +184,16 @@ The profile is written to disk with mode `0600`.
 
 ### 8. Environment build
 
-`internal/exec.BuildSpawnEnv` constructs the spawn environment:
+The orchestrator first applies the invoked provider's `ProviderSpec.EnvDefaults` to the parent environment (via `exec.ApplyEnvDefaults`), then `internal/exec.BuildSpawnEnv` constructs the spawn environment from the merged result.
+
+`exec.ApplyEnvDefaults` appends KEY=VAL pairs only when the user has not already set the key themselves — user values always win. The order matters for security: applying defaults first means they go through the same strip pass as inherited parent env, so an `EnvDefaults["NODE_OPTIONS"] = "..."` (or any other `alwaysStripKeys` entry — `DYLD_*`, `BASH_ENV`, `PYTHONSTARTUP`, …) from a hostile or misconfigured out-of-tree provider cannot bypass loader-hook stripping. Used to nudge sandbox-friendly behavior; e.g., claude ships with `DISABLE_TELEMETRY=1` so its synchronous Datadog flush does not hang on a non-allowlisted intake host.
+
+`BuildSpawnEnv` then:
 
 - **Strips** credential-bearing env vars (`AWS_*`, `SSH_AUTH_SOCK`, `KUBECONFIG`, `VAULT_TOKEN`, `GH_TOKEN`/`GITHUB_TOKEN`, `NPM_TOKEN`, Azure SP vars, etc.) and other providers' API keys. The full strip set is in `internal/exec/env.go` (`alwaysStripKeys`).
 - **Strips** interpreter / dynamic-loader hooks that hijack process bootstrap (`NODE_OPTIONS`, `DYLD_*`, `PYTHONSTARTUP`, `BASH_ENV`, `RUBYOPT`, `PERL5OPT`, `JAVA_TOOL_OPTIONS`, `LD_PRELOAD`, …).
 - **Injects** `HTTPS_PROXY=http://127.0.0.1:<port>` (and lowercase variants).
 - **Injects** `NO_PROXY=localhost,127.0.0.1,::1`.
-- **Applies** the invoked provider's `ProviderSpec.EnvDefaults` via `exec.ApplyEnvDefaults` — KEY=VAL pairs are appended only when the user has not set the key themselves. Used to nudge sandbox-friendly behavior; e.g., claude ships with `DISABLE_TELEMETRY=1` so its synchronous Datadog flush does not hang on a non-allowlisted intake host.
 
 ### 9. Process wrap
 

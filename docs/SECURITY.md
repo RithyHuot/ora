@@ -141,9 +141,9 @@ with a symlink even if `~/.ssh` does not yet exist.
 
 ### Mach-lookup / XPC service reachability (closeable opt-in)
 
-By default the generated profile emits `(allow mach-lookup)` without restricting which Mach/XPC service names the sandboxed CLI can address. That permits the wrapped agent to reach `com.apple.securityd` (Keychain `SecItemCopyMatching`) and 1Password / GUI password-manager XPC daemons even though `~/.config/op`, `~/.aws`, `~/.kube`, etc. are denied at the filesystem layer — the agent talks to the daemon directly instead of reading credentials off disk.
+By default the generated profile emits `(allow mach-lookup)` without restricting which Mach/XPC service names the sandboxed CLI can address. That permits the wrapped agent to reach 1Password / GUI password-manager XPC daemons and any other XPC service even though `~/.config/op`, `~/.aws`, `~/.kube`, etc. are denied at the filesystem layer — the agent talks to the daemon directly instead of reading credentials off disk.
 
-Set `strict_mach_lookup = true` under `[paths]` in `~/.config/ora/config.toml`, or pass `ORA_STRICT_MACH_LOOKUP=1`, to replace the blanket grant with an enumerated XPC allowlist (Anthropic's `sandbox-runtime` baseline plus `com.apple.SecurityServer`). The toggle is off by default while per-provider compatibility against the strict list is being validated; if a CLI fails under it, the missing service name appears in `log show --predicate 'sender == "Sandbox"'` and can be added to a future revision of the list.
+Set `strict_mach_lookup = true` under `[paths]` in `~/.config/ora/config.toml`, or pass `ORA_STRICT_MACH_LOOKUP=1`, to replace the blanket grant with an enumerated XPC allowlist (Anthropic's `sandbox-runtime` baseline plus `com.apple.SecurityServer`). Strict mode blocks 1Password and arbitrary out-of-baseline XPC services; Keychain access via `com.apple.securityd.xpc` stays on the allowlist because claude's OAuth flow (and any provider using `SecItem*`) requires it. The toggle is off by default while per-provider compatibility against the strict list is being validated; if a CLI fails under it, the missing service name appears in `log show --predicate 'sender == "Sandbox"'` and can be added to a future revision of the list.
 
 ### Sandbox re-entry
 
