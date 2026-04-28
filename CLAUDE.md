@@ -122,6 +122,25 @@ Tagging `vX.Y.Z` is not just `git tag`. In the same commit (or release PR):
 
 Skipping any of these is what makes `[Unreleased]` grow into a multi-release blob — v0.2.0 / v0.2.1 / v0.2.2 all shipped without cutting, and the catch-up was a separate doc PR. Cut at tag time, not later.
 
+## Commit message convention
+
+Conventional commits: `type(scope): subject`.
+
+- **Type is a single lowercase token — no spaces.** `release skill: …` is not valid; use `release: …` (release tooling) or `docs(release-skill): …` (the skill itself is a doc artifact).
+- **Subject is imperative mood, no trailing period**, ≤72 chars when practical. Name the exact thing changed — no filler verbs ("update", "fix", "improve", "refactor") standing alone without a subject.
+- **Body explains *why* and the *symptom*, not the diff.** Match the prose style in `CHANGELOG.md` — readers want the motivation and the user-visible behavior, not "I added X to file Y."
+
+Types in use (precedent from `git log`):
+
+| Type | When | Example |
+|---|---|---|
+| `feat` | New public-facing capability | `feat: public release` |
+| `fix` | Bug fix | `fix(sandbox): allow xcode-select link reads so /usr/bin/git stops triggering CLT install dialog` |
+| `docs` | Documentation, including skills under `.claude/skills/` | `docs(readme): add uninstall section` |
+| `release` | Release tooling, CHANGELOG cuts, the `release: vX.Y.Z` commit produced by `make release`, or release-pipeline bug fixes | `release: install syft+cosign in CI and catch up CHANGELOG/docs` |
+
+Scope is optional but useful — common scopes: `sandbox`, `proxy`, `providers`, `version`, `ci`, `lint`, `readme`. Multi-word scopes hyphenate (`docs(release-skill)`).
+
 ## Linter notes
 
 `.golangci.yml` intentionally suppresses some rules:
