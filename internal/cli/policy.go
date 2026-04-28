@@ -66,6 +66,7 @@ func runPolicyShow(out io.Writer, provider string) error {
 		NodeBinDirs:      []string{"/usr/bin"},
 		HomebrewRoots:    sandbox.DetectHomebrewRoots(nil),
 		VersionMgrDirs:   sandbox.DetectVersionMgrDirs(home, nil),
+		XcodeReadSubpath: sandbox.DetectXcodeReadSubpath(nil),
 		AllowUnixSockets: cfg.AllowUnixSockets,
 		Policy: sandbox.ProfilePolicy{
 			AllowNpmrc:              cfg.AllowNpmrc,

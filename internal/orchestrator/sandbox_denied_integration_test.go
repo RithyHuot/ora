@@ -120,3 +120,62 @@ func TestIntegration_RunnerEmitsSandboxDeniedMarker(t *testing.T) {
 		t.Errorf("expected [SANDBOX DENIED] marker on stderr, got:\n%s", stderrBuf.String())
 	}
 }
+
+// TestIntegration_GitDoesNotTriggerXcodeSelectInstall guards the regression
+// fixed in `fix(sandbox): allow xcode-select link reads`. /usr/bin/git on
+// macOS is a libxcselect shim that resolves the active developer dir from
+// /var/select/developer_dir (and /var/db/xcode_select_link) before exec'ing
+// the real git. When the sandbox denies read on those links the shim emits
+// "xcode-select: ... No developer tools were found, requesting install" and
+// the user gets the CLT install dialog every run. This test asserts the
+// generated profile lets `/usr/bin/git --version` succeed without that
+// xcode-select error path firing. Skipped when no developer tools are
+// installed at all (then the dialog is the correct behavior).
+func TestIntegration_GitDoesNotTriggerXcodeSelectInstall(t *testing.T) {
+	t.Parallel()
+	if _, err := exec.LookPath("sandbox-exec"); err != nil {
+		t.Skip("sandbox-exec not on PATH")
+	}
+	if _, err := os.Stat("/var/select/developer_dir"); err != nil {
+		if _, err2 := os.Stat("/var/db/xcode_select_link"); err2 != nil {
+			t.Skip("no xcode-select link present; install dialog is the correct behavior")
+		}
+	}
+
+	tmp := t.TempDir()
+	profile, err := sandbox.GenerateProfile(sandbox.ProfileOptions{
+		HomeDir:          tmp,
+		WritablePaths:    []string{tmp},
+		NodeBinDirs:      []string{"/usr/bin"},
+		HomebrewRoots:    sandbox.DetectHomebrewRoots(nil),
+		VersionMgrDirs:   nil,
+		XcodeReadSubpath: sandbox.DetectXcodeReadSubpath(nil),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	profilePath := filepath.Join(tmp, "git_xcselect.sb")
+	if err := os.WriteFile(profilePath, []byte(profile), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Point HOME at the sandboxed tmp so libxcselect's downstream git
+	// doesn't trip on the host user's ~/.gitconfig (denied because the
+	// profile's HomeDir is tmp). We're testing the xcode-select shim,
+	// not gitconfig propagation — git just needs to print its version.
+	cmd := exec.Command("sandbox-exec", "-f", profilePath, "/usr/bin/git", "--version")
+	cmd.Env = append(os.Environ(), "HOME="+tmp)
+	out, err := cmd.CombinedOutput()
+	output := string(out)
+	if strings.Contains(output, "No developer tools were found") ||
+		strings.Contains(output, "requesting install") ||
+		strings.Contains(output, "unable to read data link") {
+		t.Fatalf("/usr/bin/git triggered the xcode-select install path under sandbox; output:\n%s", output)
+	}
+	if err != nil {
+		t.Fatalf("/usr/bin/git --version failed under sandbox: %v\nOutput:\n%s", err, output)
+	}
+	if !strings.Contains(output, "git version") {
+		t.Errorf("expected `git version ...` output, got:\n%s", output)
+	}
+}

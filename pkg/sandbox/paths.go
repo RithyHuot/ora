@@ -451,3 +451,119 @@ func DetectGitCommonDir(workspace string) (string, error) {
 	}
 	return resolved, nil
 }
+
+// xcodeSelectLinkPaths is the ordered list of system symlinks that
+// xcode-select / libxcselect consult to locate the active developer
+// directory. The /var/select form is the modern path; /var/db is the
+// legacy fallback. macOS still maintains both on current releases.
+var xcodeSelectLinkPaths = []string{
+	"/var/select/developer_dir",
+	"/var/db/xcode_select_link",
+}
+
+// commandLineToolsRoot is the canonical install path for Command Line
+// Tools. The base profile always grants subpath read here, so xcselect
+// can fall back to CLT whenever the active dev dir is unreachable.
+const commandLineToolsRoot = "/Library/Developer/CommandLineTools"
+
+// DetectActiveDeveloperDir returns the canonical path of the active
+// xcode-select developer directory, or "" when no link is readable or
+// the link target does not exist.
+//
+// macOS's /usr/bin/git is a libxcselect shim that resolves the active
+// developer dir from these symlinks before exec'ing the real git. When
+// the sandbox denies read on the links, the shim concludes "no developer
+// tools" and triggers the Command Line Tools install dialog — every run,
+// even after the user installs CLT, because the underlying access denial
+// has not changed.
+//
+// Pass nil for logger to use slog.Default().
+func DetectActiveDeveloperDir(logger *slog.Logger) string {
+	return detectActiveDeveloperDirAt(logger, xcodeSelectLinkPaths)
+}
+
+// detectActiveDeveloperDirAt is the testable form: it consults the
+// supplied link paths in order and returns the first one whose target
+// exists. Exposed for tests so they can point at temp symlinks.
+func detectActiveDeveloperDirAt(logger *slog.Logger, linkPaths []string) string {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	for _, link := range linkPaths {
+		target, err := os.Readlink(link)
+		if err != nil {
+			continue
+		}
+		if !filepath.IsAbs(target) {
+			target = filepath.Join(filepath.Dir(link), target)
+		}
+		target = filepath.Clean(target)
+		if _, err := os.Stat(target); err != nil {
+			logger.Warn("DetectActiveDeveloperDir: target missing",
+				"link", link, "target", target, "err", err)
+			continue
+		}
+		return target
+	}
+	return ""
+}
+
+// DetectXcodeReadSubpath returns an additional read-only subpath the
+// sandbox should grant so the libxcselect shim in /usr/bin/git can
+// resolve and exec the active developer dir, or "" when no extra grant
+// is needed.
+//
+// Returns "" when:
+//   - No xcode-select link is readable.
+//   - The active dev dir is already covered by /Library/Developer/CommandLineTools
+//     (the base profile always allows that subpath).
+//   - Command Line Tools is installed alongside the active dev dir.
+//     libxcselect falls back to CLT whenever the active dir is unreachable,
+//     so granting Xcode.app would only widen the sandbox without changing
+//     behavior — and exposing /Applications/Xcode.app/Contents/Developer
+//     alone is worse than nothing because xcselect would then prefer it
+//     and fail loading frameworks at sibling /Applications/Xcode.app/Contents
+//     paths that remain denied.
+//
+// In all other cases (Xcode-only install, custom Xcode bundle, etc.)
+// returns the .app bundle root when the dev dir matches `<root>/Contents/Developer`,
+// so DVT* frameworks at sibling /Contents/{Frameworks,SharedFrameworks}
+// load correctly. Falls back to the raw dev dir for unrecognized layouts.
+//
+// Pass nil for logger to use slog.Default().
+func DetectXcodeReadSubpath(logger *slog.Logger) string {
+	return detectXcodeReadSubpath(logger, DetectActiveDeveloperDir(logger), commandLineToolsInstalled())
+}
+
+// detectXcodeReadSubpath is the testable form: pure inputs, no I/O.
+func detectXcodeReadSubpath(logger *slog.Logger, activeDevDir string, cltPresent bool) string {
+	if activeDevDir == "" {
+		return ""
+	}
+	cleaned := filepath.Clean(activeDevDir)
+	if cleaned == commandLineToolsRoot ||
+		strings.HasPrefix(cleaned, commandLineToolsRoot+"/") {
+		return ""
+	}
+	if cltPresent {
+		if logger == nil {
+			logger = slog.Default()
+		}
+		logger.Debug("DetectXcodeReadSubpath: CLT present, deferring to xcselect fallback",
+			"active_dev_dir", cleaned)
+		return ""
+	}
+	if root, ok := strings.CutSuffix(cleaned, "/Contents/Developer"); ok {
+		return root
+	}
+	return cleaned
+}
+
+// commandLineToolsInstalled reports whether the CLT git binary is present.
+// We probe the binary specifically (not the directory) because the directory
+// can survive a partial uninstall; the git binary is what xcselect's
+// fallback actually exec's into.
+func commandLineToolsInstalled() bool {
+	_, err := os.Stat(filepath.Join(commandLineToolsRoot, "usr/bin/git"))
+	return err == nil
+}

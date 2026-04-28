@@ -94,6 +94,23 @@ These are easy to break by accident — preserve them.
 
 Out-of-tree providers register at runtime via `providers.Register(spec)` — see `CONTRIBUTING.md` for the example.
 
+## Updating docs alongside code
+
+When a change touches the categories below, update the corresponding doc in the **same PR** (and same commit when practical). Reviewers will catch missing entries — adding them after the fact creates churn.
+
+| If you change… | Update |
+|---|---|
+| Add/remove/rename an exported `pkg/` symbol (function, type, struct field, constant) | `docs/STABILITY.md` — "Stable" list under the right `pkg/` heading. Breaking renames or signature changes also go in `docs/STABILITY.md` "Recent breaking changes (pre-1.0)". |
+| Add/remove/modify a path-allow or path-deny in the generated profile | `docs/ARCHITECTURE.md` — "Profile anatomy" → Layer 2 (allows) or Layer 3 (denies). Mention *why* the grant exists (which CLI / call needs it) — that's what readers come for. |
+| Fix a user-visible bug, change CLI behavior, add a feature, or change defaults | `CHANGELOG.md` `[Unreleased]` — `### Fixed` / `### Added` / `### Changed`. Match the existing prose style: explain the *why* and the *symptom*, not just the diff. |
+| Add a config knob (env var, `.ora.toml` field, CLI flag) | `docs/CONFIGURATION.md` plus `CHANGELOG.md` `### Added`. |
+| Tighten or weaken a security boundary | `docs/SECURITY.md` ("Security boundaries" table in `docs/ARCHITECTURE.md` mirrors this — keep them consistent) plus `CHANGELOG.md`. |
+| Add/change error handling or exit-code semantics | `docs/SANDBOX_ERROR_BEHAVIOR.md`. |
+| Add a new provider | `pkg/providers/registry.go` + tests; the `## Adding a new provider` section above already lists the hot path. No separate doc, but mention in `CHANGELOG.md` `### Added`. |
+| Change release tooling, goreleaser config, or CI | `docs/RELEASE.md`. |
+
+If a change crosses multiple categories (e.g. a fix that adds a new exported helper and changes the profile), update each doc — they exist for different audiences (embedders read STABILITY, operators read ARCHITECTURE, users read CHANGELOG).
+
 ## Linter notes
 
 `.golangci.yml` intentionally suppresses some rules:
