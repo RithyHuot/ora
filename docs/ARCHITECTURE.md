@@ -289,7 +289,7 @@ When `Policy.AllowWorkspaceDotenv=true`, a workspace-anchored regex re-allow (`^
 
 - **Home-relative:** `.ssh`, `.aws`, `.gnupg`, `.docker`, shell rc files, `.git-credentials`, `.npmrc`
 - **Regex:** `^.*\.env$`, `^.*\.pem$`, `^.*\.key$`, `^.*id_rsa.*$`, `^.*id_ed25519.*$`
-- **Workspace-relative:** `.git/hooks`, `.gitmodules`, `.mcp.json`, `.ripgreprc`, `.git/config` (unless opted in)
+- **Workspace-relative:** `.git/hooks` (unless opted in), `.gitmodules`, `.mcp.json`, `.ripgreprc`, `.git/config` (unless opted in)
 - **Ancestor symlink-create:** `file-write-create` denied on every ancestor directory of every protected path
 
 ## Proxy behavior

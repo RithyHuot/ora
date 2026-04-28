@@ -31,6 +31,9 @@ changes require a major-version bump.
   - `AllowWorkspaceDotenv bool` — opt-in workspace-scoped re-allow of
     `.env` files, overriding the global `*.env` regex deny inside the
     writable workspace tree (added in unreleased)
+  - `AllowGitHooks bool` — opt-in that removes the workspace
+    `.git/hooks` subpath deny, allowing pre-commit hooks (husky,
+    lint-staged) to run inside the sandbox (added in unreleased)
 - `ParseSandboxLogLine`, `SandboxDenyEvent`
 - `ErrLogMonitorUnsupported`
 - `StartLogMonitor`, `SelfTestLogStream` (macOS-only at runtime; will move
@@ -157,8 +160,8 @@ wrapped CLI to die at runtime when trying to read its own executable.
 ## Audit log
 
 This document was last reconciled against `go doc -all` on 2026-04-28
-(post-`StrictMachLookup` addition to `ProfilePolicy`; also covers the
-`AllowedDomains`/`EnvDefaults` additions to `ProviderSpec`).
+(post-`AllowGitHooks` addition to `ProfilePolicy`; also covers the
+`StrictMachLookup` and `AllowWorkspaceDotenv` additions).
 When making any change to a `pkg/` exported symbol, update this file in
 the same commit. Run `go doc -all ./pkg/...` and grep against this file
 to catch drift.

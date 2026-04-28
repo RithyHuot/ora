@@ -113,7 +113,7 @@ Denied anywhere on the filesystem via Seatbelt regex rules:
 Denied inside every writable path (project directory):
 
 - `.git/hooks` (subpath deny — prevents arbitrary script execution on the
-  user's next `git commit` outside the sandbox)
+  user's next `git commit` outside the sandbox; opt-in via `allow_git_hooks`)
 - `.gitmodules` (literal deny — RCE on next `git submodule update`)
 - `.mcp.json` (literal deny — RCE on next Claude Code launch)
 - `.ripgreprc` (literal deny — sourced by every `rg` invocation)

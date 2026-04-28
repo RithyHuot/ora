@@ -25,6 +25,7 @@ type ProfilePolicy struct {
 	DenyHomeGitconfig       bool
 	AllowNpmrc              bool // default false; opt-in via ORA_ALLOW_NPMRC
 	AllowWorkspaceGitConfig bool // default false; opt-in. When false, $WS/.git/config is denied for read+write.
+	AllowGitHooks           bool // default false; opt-in. When true, $WS/.git/hooks is NOT denied, allowing pre-commit hooks (husky, lint-staged) to run inside the sandbox.
 	// AllowWorkspaceDotenv re-allows read+write on `.env` files inside
 	// each writable workspace path, overriding the global *.env regex
 	// deny. Default false. Opt-in for repos that commit .env files
@@ -517,8 +518,12 @@ func emitDenyOverrides(b *strings.Builder, o ProfileOptions) {
 	line("; ============================================================")
 	line("; WORKSPACE-RELATIVE DENY — applied per writable root")
 	line("; ============================================================")
+	denyPaths := workspaceDenyPaths
+	if o.Policy.AllowGitHooks {
+		denyPaths = workspaceDenyPathsWithoutGitHooks()
+	}
 	for _, wp := range o.WritablePaths {
-		for _, rel := range workspaceDenyPaths {
+		for _, rel := range denyPaths {
 			line(fmt.Sprintf(`(deny file-read* file-write* (subpath %s))`, lit(filepath.Join(wp, rel))))
 		}
 		denyLiterals := workspaceDenyLiterals
@@ -610,8 +615,12 @@ func emitProfileFooter(b *strings.Builder, o ProfileOptions) {
 		denyAbs = append(denyAbs, filepath.Join(o.HomeDir, ".npmrc"))
 	}
 	denyAbs = append(denyAbs, o.ExtraDenyLiterals...)
+	denyPaths := workspaceDenyPaths
+	if o.Policy.AllowGitHooks {
+		denyPaths = workspaceDenyPathsWithoutGitHooks()
+	}
 	for _, wp := range o.WritablePaths {
-		for _, rel := range workspaceDenyPaths {
+		for _, rel := range denyPaths {
 			denyAbs = append(denyAbs, filepath.Join(wp, rel))
 		}
 		denyLiterals := workspaceDenyLiterals

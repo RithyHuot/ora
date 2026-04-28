@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `allow_git_hooks` opt-in (`ORA_GIT_HOOKS=1` or `paths.allow_git_hooks = true` in TOML) that removes the workspace `.git/hooks` deny from the sandbox profile. Pre-commit hooks (husky, lint-staged) run inside the sandbox when this flag is set. The default remains denied because `.git/hooks` is an RCE primitive — hooks execute arbitrary code on `git commit`. The denial hint pipeline now suggests this flag when `.git/hooks` access is blocked.
+
 ## [0.4.0] - 2026-04-28
 
 ### Added

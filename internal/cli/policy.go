@@ -72,6 +72,7 @@ func runPolicyShow(out io.Writer, provider string) error {
 		Policy: sandbox.ProfilePolicy{
 			AllowNpmrc:              cfg.AllowNpmrc,
 			AllowWorkspaceGitConfig: cfg.AllowWorkspaceGitConfig,
+			AllowGitHooks:           cfg.AllowGitHooks,
 			AllowWorkspaceDotenv:    cfg.AllowWorkspaceDotenv,
 			AllowSysVShm:            cfg.AllowSysVShm,
 			StrictSysctl:            cfg.StrictSysctl,

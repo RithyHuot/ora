@@ -509,6 +509,53 @@ func TestGenerateProfile_WorkspaceDeniesGitHooks(t *testing.T) {
 	}
 }
 
+func TestGenerateProfile_AllowsGitHooksWhenOptIn(t *testing.T) {
+	o := baseOpts()
+	o.Policy.AllowGitHooks = true
+	got, err := GenerateProfile(o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(got, `(deny file-read* file-write* (subpath "/Users/alice/code/proj/.git/hooks"))`) {
+		t.Errorf("expected NO .git/hooks deny when AllowGitHooks=true")
+	}
+}
+
+// TestGenerateProfile_GitHooksOptInKeepsAncestorDeny verifies that when
+// AllowGitHooks removes the .git/hooks subpath deny, the ancestor
+// file-write-create deny on .git still appears (because .gitmodules,
+// .mcp.json, and .git/config still sit under .git).
+func TestGenerateProfile_GitHooksOptInKeepsAncestorDeny(t *testing.T) {
+	o := baseOpts()
+	o.Policy.AllowGitHooks = true
+	got, err := GenerateProfile(o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, `(deny file-write-create (literal "/Users/alice/code/proj/.git"))`) {
+		t.Errorf("expected .git ancestor file-write-create deny even when AllowGitHooks=true")
+	}
+}
+
+// TestGenerateProfile_AllowGitHooksAndAllowGitConfigBothTrue verifies the
+// combined case where both flags are opted in: neither .git/hooks subpath
+// deny nor .git/config literal deny should appear in the profile.
+func TestGenerateProfile_AllowGitHooksAndAllowGitConfigBothTrue(t *testing.T) {
+	o := baseOpts()
+	o.Policy.AllowGitHooks = true
+	o.Policy.AllowWorkspaceGitConfig = true
+	got, err := GenerateProfile(o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(got, `(deny file-read* file-write* (subpath "/Users/alice/code/proj/.git/hooks"))`) {
+		t.Errorf("expected NO .git/hooks deny when AllowGitHooks=true")
+	}
+	if strings.Contains(got, `(deny file-read* file-write* (literal "/Users/alice/code/proj/.git/config"))`) {
+		t.Errorf("expected NO .git/config deny when AllowWorkspaceGitConfig=true")
+	}
+}
+
 func TestGenerateProfile_WorkspaceDeniesDangerousLiterals(t *testing.T) {
 	got, err := GenerateProfile(baseOpts())
 	if err != nil {

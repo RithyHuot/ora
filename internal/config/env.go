@@ -20,6 +20,10 @@ type Config struct {
 	// AllowWorkspaceGitConfig opts in to writes on $WORKSPACE/.git/config. Default false:
 	// .git/config is a documented RCE primitive ([core] hooksPath, [alias] foo = !cmd).
 	AllowWorkspaceGitConfig bool
+	// AllowGitHooks opts in to read+execute access on $WORKSPACE/.git/hooks. Default false:
+	// .git/hooks is an RCE primitive (pre-commit, husky, lint-staged). Opt-in for
+	// workflows where the wrapped CLI needs to invoke git hooks inside the sandbox.
+	AllowGitHooks bool
 	// AllowWorkspaceDotenv re-allows read+write on `.env` files inside the
 	// workspace, overriding the global *.env regex deny. Default false:
 	// dotenv files commonly contain secrets and the deny exists to prevent
@@ -99,6 +103,11 @@ func LoadEnv() Config {
 	if v := os.Getenv("ORA_ALLOW_WORKSPACE_DOTENV"); v != "" {
 		if b, ok := parseBool(v); ok {
 			c.AllowWorkspaceDotenv = b
+		}
+	}
+	if v := os.Getenv("ORA_GIT_HOOKS"); v != "" {
+		if b, ok := parseBool(v); ok {
+			c.AllowGitHooks = b
 		}
 	}
 	if v := os.Getenv("ORA_ALLOWED_DOMAINS"); v != "" {

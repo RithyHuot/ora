@@ -118,6 +118,7 @@ This is the most reliable way to feed sandbox errors back into an orchestrator: 
 | Symptom | Likely sandbox boundary |
 |---|---|
 | `Operation not permitted` writing a file | Writing outside the worktree or to a denied path (e.g., `~/.ssh`, `.git/hooks`) |
+| `Operation not permitted` reading a file under `.git/hooks` | `.git/hooks` is denied by default; opt in via `ORA_GIT_HOOKS=1` or `paths.allow_git_hooks = true` |
 | Connection failure to a host | Host not in the HTTPS domain allowlist |
 | Keychain / security errors | `mach-lookup` denied (e.g., `security` CLI trying to access Keychain) |
 | Python `multiprocessing` fails | Named POSIX semaphores not granted (`ipc-posix-sem`) |
@@ -130,7 +131,7 @@ ora policy show --provider claude
 
 This prints the effective Seatbelt profile and allowed-domain list. Verify whether the path or domain you're trying to access is:
 - In the **mandatory deny list** (e.g., `~/.ssh`, `~/.aws`, `.env` files)
-- In the **workspace-relative deny list** (e.g., `.git/hooks`, `.gitmodules`, `.mcp.json`)
+- In the **workspace-relative deny list** (e.g., `.git/hooks` (opt-in via `allow_git_hooks`), `.gitmodules`, `.mcp.json`)
 - Missing from the **egress allowlist**
 
 ---

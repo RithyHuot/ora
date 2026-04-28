@@ -18,6 +18,7 @@ type fileShape struct {
 	Paths struct {
 		AllowNpmrc              bool     `toml:"allow_npmrc"`
 		AllowWorkspaceGitConfig bool     `toml:"allow_git_config"`
+		AllowGitHooks           bool     `toml:"allow_git_hooks"`
 		AllowWorkspaceDotenv    bool     `toml:"allow_workspace_dotenv"`
 		AllowSysVShm            bool     `toml:"allow_sysv_shm"`
 		ExtraWritable           []string `toml:"extra_writable"`
@@ -62,6 +63,7 @@ func ParseBytes(path string, b []byte) (Config, error) {
 	c.ExtraDomains = f.Egress.ExtraDomains
 	c.AllowNpmrc = f.Paths.AllowNpmrc
 	c.AllowWorkspaceGitConfig = f.Paths.AllowWorkspaceGitConfig
+	c.AllowGitHooks = f.Paths.AllowGitHooks
 	c.AllowWorkspaceDotenv = f.Paths.AllowWorkspaceDotenv
 	c.AllowSysVShm = f.Paths.AllowSysVShm
 	c.ExtraWritable = f.Paths.ExtraWritable
@@ -99,6 +101,9 @@ func Merge(base, override Config) Config {
 	}
 	if override.AllowWorkspaceGitConfig {
 		out.AllowWorkspaceGitConfig = true
+	}
+	if override.AllowGitHooks {
+		out.AllowGitHooks = true
 	}
 	if override.AllowWorkspaceDotenv {
 		out.AllowWorkspaceDotenv = true
