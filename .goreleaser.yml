@@ -1,0 +1,54 @@
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: ora
+    main: ./cmd/ora
+    binary: ora
+    env:
+      - CGO_ENABLED=0
+    goos: [darwin]
+    goarch: [arm64, amd64]
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
+archives:
+  - id: ora
+    name_template: "ora_{{.Version}}_{{.Os}}_{{.Arch}}"
+    formats: [tar.gz]
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  version_template: "{{ .Tag }}-snapshot"
+
+sboms:
+  - artifacts: archive
+
+signs:
+  # Keyless cosign signing of the checksum blob. Local snapshot builds skip
+  # this stage via the `--skip=sign` flag in the Makefile snapshot target,
+  # because keyless OIDC requires interactive browser auth and is only
+  # appropriate at actual release time (where CI provides an OIDC token).
+  - cmd: cosign
+    artifacts: checksum
+    args:
+      - "sign-blob"
+      - "--yes"
+      - "--bundle=${signature}"
+      - "${artifact}"
+    signature: "${artifact}.bundle"
+    output: true
+
+release:
+  github:
+    owner: rithyhuot
+    name: ora
+  draft: true

@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, macos-15]
+        go: ['1.23.0', '1.24.0', '1.25.0']
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+      - name: Vet
+        run: go vet ./...
+      - name: Unit tests (with race detector)
+        run: go test -race -count=1 ./...
+      - name: Integration tests (darwin only)
+        if: runner.os == 'macOS'
+        run: go test -tags=integration -race -count=1 ./...
+
+  lint:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.0'
+      - uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.8.0
+
+  vuln:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.0'
+      - run: go install golang.org/x/vuln/cmd/govulncheck@v1.3.0
+      - run: govulncheck ./...

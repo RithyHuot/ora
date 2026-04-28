@@ -1,0 +1,43 @@
+name: Bug report
+description: Report a bug or unexpected behavior
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: textarea
+    attributes:
+      label: What happened?
+      description: A clear description of the bug.
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Steps to reproduce
+      description: Commands or actions that trigger the issue.
+      placeholder: |
+        1. Run `ora claude`
+        2. Ask it to write a file outside the project
+        3. See error
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Expected behavior
+      description: What you expected to happen instead.
+    validations:
+      required: true
+  - type: input
+    attributes:
+      label: ora version
+      description: Output of `ora --version`
+    validations:
+      required: true
+  - type: input
+    attributes:
+      label: macOS version
+      description: Output of `sw_vers -productVersion`
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Additional context
+      description: Logs, config files, or other relevant details.

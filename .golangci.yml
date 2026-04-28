@@ -1,0 +1,55 @@
+version: "2"
+
+run:
+  timeout: 3m
+
+linters:
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - misspell
+    - revive
+    - errorlint
+    - gosec
+    - bodyclose
+    - noctx
+    - nilerr
+    - gocritic
+  exclusions:
+    paths:
+      - "^bin/"
+      - "^dist/"
+    rules:
+      # Subprocess-with-variadic and weak-perms gosec rules are too noisy for
+      # a sandbox project that intentionally exec's user-supplied tools.
+      - linters: [gosec]
+        text: "G204|G306|G115"
+      - linters: [gocritic]
+        text: "ifElseChain|hugeParam|paramTypeCombine"
+      # Tests routinely write fixtures, dial sockets, and skip TLS — accept that.
+      - linters: [gosec, noctx, bodyclose]
+        path: "_test\\.go"
+      # The proxy CONNECT path uses net.DialTimeout where context-aware dialers
+      # would obscure the per-tunnel timeout semantics. Revisit if a stronger
+      # cancel story is needed.
+      - linters: [noctx]
+        path: "pkg/proxy/proxy\\.go"
+  settings:
+    revive:
+      rules:
+        - name: exported
+          arguments:
+            - "checkPrivateReceivers"
+            - "disableStutteringCheck"
+    errorlint:
+      errorf: true
+      asserts: true
+      comparison: true
+
+formatters:
+  enable:
+    - gofmt
+    - goimports

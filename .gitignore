@@ -1,0 +1,30 @@
+# Build output
+/bin/
+/dist/
+/ora
+
+# Go
+*.test
+*.out
+coverage.*
+
+# Editor
+.idea/
+.vscode/
+*.swp
+
+# macOS
+.DS_Store
+
+# Local config / secrets
+.env
+.env.local
+
+# Claude Code
+.claude/
+
+# Test artifacts
+/tmp-test/
+
+# Internal planning notes (never published)
+/docs/superpowers/
