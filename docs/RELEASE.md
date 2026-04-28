@@ -10,24 +10,29 @@ This document describes how to release `ora` binaries.
 
 ## Automated release (recommended)
 
-Push a version tag to trigger the GitHub Actions release workflow:
+Use `make release` to prep the release commit and tag, then push to trigger
+the GitHub Actions release workflow:
 
 ```bash
-# 1. Ensure main is green
+# 1. Sync main
 git checkout main
 git pull origin main
-make test
-make test-int   # macOS only
 
-# 2. Update CHANGELOG.md with the new version
-# 3. Commit any final changes
-git add -A
-git commit -m "chore: bump version for vX.Y.Z"
+# 2. Prep the release: cuts CHANGELOG.md [Unreleased] into a dated
+#    ## [X.Y.Z] section, bumps VERSION=vX.Y.Z in README.md, runs lint
+#    and tests, asks for confirmation, then commits and tags.
+make release VERSION=vX.Y.Z
 
-# 4. Tag and push
-git tag -a v0.1.0 -m "Release v0.1.0"
-git push origin main --follow-tags
+# 3. Push the commit and tag — the tag push is what triggers the
+#    release workflow, so this step is intentionally manual.
+git push origin main
+git push origin vX.Y.Z
 ```
+
+If `make release` refuses, fix the reported gate (e.g. `[Unreleased]` is
+empty, working tree dirty, branch out of sync) and re-run. To skip the
+interactive confirmation in scripted contexts, set `RELEASE_YES=1` or pass
+`--yes` directly to `scripts/release.sh`.
 
 The `.github/workflows/release.yml` workflow will:
 
@@ -44,25 +49,27 @@ After the workflow completes, review the draft release on GitHub and publish it.
 
 ## Manual release (local)
 
-If you need to release from your local machine:
+If you need to publish a release from your local machine instead of CI
+(e.g. the workflow is broken and you need to ship now):
 
 ```bash
-# 1. Ensure clean working tree and tests pass
-make test
-make lint
+# 1. Prep and tag the same way as the automated flow.
+make release VERSION=vX.Y.Z
 
-# 2. Set your GitHub token
+# 2. Set your GitHub token so GoReleaser can create the draft release.
 export GITHUB_TOKEN=$(gh auth token)
 
-# 3. Create and push the tag
-git tag -a v0.1.0 -m "Release v0.1.0"
-git push origin v0.1.0
+# 3. Push so the tag exists on origin (GoReleaser reads it from origin).
+git push origin main
+git push origin vX.Y.Z
 
-# 4. Run GoReleaser
-make release
+# 4. Run GoReleaser locally. Requires syft and cosign on $PATH —
+#    install via `brew install syft cosign` if missing.
+make release-publish
 
-# Or with snapshot (no tag required, for testing):
-goreleaser release --snapshot --clean
+# Snapshot build (no tag, no publish — useful for verifying the
+# goreleaser config or generating local artifacts):
+make snapshot
 ```
 
 ## Version numbering
@@ -75,16 +82,23 @@ Follows [Semantic Versioning](https://semver.org/):
 
 ## Pre-release checklist
 
-Before tagging a release:
+`make release` enforces most of these as preflight gates and refuses to
+continue if any fail. The remaining items (marked *manual*) are not
+automatable and need eyeballs:
 
-- [ ] `make test` passes
-- [ ] `make test-int` passes (macOS)
-- [ ] `make lint` passes
-- [ ] `make build` produces a working binary
-- [ ] `CHANGELOG.md` is updated
-- [ ] `README.md` install instructions reference the correct version
-- [ ] Smoke-tested `ora claude` (or another provider) against a non-trivial
-      repo to confirm no spurious `[SANDBOX DENIED]` banners
+- [x] `make test` passes — gated by `make release`
+- [x] `make lint` passes — gated by `make release`
+- [x] `CHANGELOG.md` `[Unreleased]` is non-empty — gated by `make release`
+- [x] `README.md` `VERSION=v…` example bumped — done by `make release`
+- [ ] **manual:** `make test-int` passes (macOS only; integration tests
+      are not run by `make release`)
+- [ ] **manual:** `make build` produces a working binary
+- [ ] **manual:** smoke-tested `ora claude` (or another provider) against
+      a non-trivial repo to confirm no spurious `[SANDBOX DENIED]` banners
+- [ ] **manual:** `docs/STABILITY.md` audit-log date is current if any
+      `pkg/` symbol changed since the last tag
+- [ ] **manual:** `docs/ARCHITECTURE.md` profile-anatomy section reflects
+      any new path allow / deny landed since the last tag
 
 ## Artifacts
 

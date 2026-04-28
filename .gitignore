@@ -20,9 +20,6 @@ coverage.*
 .env
 .env.local
 
-# Claude Code
-.claude/
-
 # Test artifacts
 /tmp-test/
 

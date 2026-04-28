@@ -1,4 +1,4 @@
-.PHONY: build test test-int lint install release snapshot clean help
+.PHONY: build test test-int lint install release release-publish snapshot clean help
 
 BIN := bin/ora
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
@@ -24,8 +24,16 @@ lint:
 install:
 	go install -ldflags="$(LDFLAGS)" ./cmd/ora
 
-## release: create a release via GoReleaser (requires GITHUB_TOKEN)
+## release: prep a release (cut CHANGELOG, bump README, commit, tag). Usage: make release VERSION=vX.Y.Z
 release:
+	@if [ -z "$(VERSION)" ]; then \
+	  echo "usage: make release VERSION=vX.Y.Z" >&2; \
+	  exit 1; \
+	fi
+	@./scripts/release.sh $(VERSION)
+
+## release-publish: publish a release via GoReleaser from the local machine (requires GITHUB_TOKEN). CI normally does this.
+release-publish:
 	goreleaser release --clean
 
 ## snapshot: build release artifacts locally without publishing or signing
