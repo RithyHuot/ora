@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-04-28
+
 ### Added
 
 - `pkg/sandbox.ProfilePolicy.StrictMachLookup bool` (TOML
@@ -522,7 +524,8 @@ See `docs/STABILITY.md` for the full v1.x stable surface.
   rendering or launching a browser process will fail inside the sandbox.
 - Python `multiprocessing` via named POSIX semaphores is not granted.
 
-[Unreleased]: https://github.com/rithyhuot/ora/compare/v0.2.3...HEAD
+[Unreleased]: https://github.com/rithyhuot/ora/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/rithyhuot/ora/releases/tag/v0.3.0
 [0.2.3]: https://github.com/rithyhuot/ora/releases/tag/v0.2.3
 [0.2.2]: https://github.com/rithyhuot/ora/releases/tag/v0.2.2
 [0.2.1]: https://github.com/rithyhuot/ora/releases/tag/v0.2.1
