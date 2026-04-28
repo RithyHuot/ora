@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `ora --version` reported `dev` for binaries installed via
+  `go install github.com/rithyhuot/ora/cmd/ora@vX.Y.Z` (the README's
+  recommended path). `go install` does not honor the Makefile's
+  `-ldflags="-X main.version=…"`, so the package-level default stuck.
+  `cmd/ora` now falls back to `runtime/debug.ReadBuildInfo`'s
+  `Main.Version` when no ldflags value is injected; module-installed
+  binaries report the tag they were installed at, working-tree builds
+  (`(devel)`) keep reporting `dev`, and Makefile / goreleaser builds are
+  unaffected because their ldflags-set value still wins.
 - macOS 26 (Tahoe) path-traversal regression: the kernel now evaluates each
   path component independently when the wrapped CLI calls `lstat` /
   `realpathSync`. The profile previously granted `(literal "/")` and
