@@ -7,6 +7,103 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- macOS 26 (Tahoe) path-traversal regression: the kernel now evaluates each
+  path component independently when the wrapped CLI calls `lstat` /
+  `realpathSync`. The profile previously granted `(literal "/")` and
+  `(literal HomeDir)` but nothing in between, so Node-based CLIs (gemini)
+  died with `EPERM: operation not permitted, lstat '/Users'` before reaching
+  their entry point. The generator now emits a `(literal …)` allow for every
+  ancestor of HomeDir and of each writable path between `/` (exclusive) and
+  the leaf (exclusive).
+- Bun standalone executables (claude, opencode) crashed at startup with
+  `TypeError: failed to initialize Segmenter` because JavaScriptCore
+  lazy-loads macOS ICU break-iterator data from `/usr/share/icu`, which the
+  profile did not allow. `/usr/share` is now in the system read-only path
+  set.
+- `pkg/sandbox.DetectNodeBinDir` returns `[]string` instead of `string`, and
+  the caller passes the user's HOME so resolved-symlink targets under HOME
+  (or `/usr`, `/opt/homebrew`, `/opt/local`) can be granted read access
+  alongside the unresolved dirname. `/Applications` was intentionally
+  excluded from the safe-roots set because it is mode `0775 group:admin` on
+  stock macOS — granting read on a user-writable subtree would let an
+  unsandboxed supply-chain compromise plant a binary there and a PATH
+  symlink pointing at it, then have ora's next run whitelist the planted
+  payload's directory for read access. Real-world layouts that hit
+  this:
+    * Anthropic's claude installer: `~/.local/bin/claude →
+      ~/.local/share/claude/versions/<v>` (Bun standalone needs read on the
+      resolved file to mmap embedded resources).
+    * nvm/asdf-installed Node CLIs: `~/.nvm/.../bin/foo →
+      ~/.nvm/.../lib/.../foo.js` (the `.js` entry point is in a sibling
+      tree, not the bin dir).
+  Resolutions to unsafe targets (e.g. `/`, `/etc`) are still dropped — the
+  defense against rogue PATH symlinks is preserved.
+- Plain (non-symlink) provider binaries no longer trip the safe-root check
+  via macOS's `/var → /private/var` canonical path rewrite; an `Lstat`
+  short-circuit skips resolution when the binary is not actually a symlink.
+- OpenCode auth dirs now include `~/.local/state/opencode` (XDG_STATE_HOME)
+  and `~/.cache/opencode` (XDG_CACHE_HOME). OpenCode writes lock files,
+  prompt history, and provider-binary cache to these paths and crashes at
+  startup if either is unwritable.
+- Profile now grants `(file-read* (subpath "~/Library/Keychains"))`. macOS
+  Keychain access via `SecItemCopyMatching` does the actual decrypt over
+  XPC to securityd (already reachable via the existing `mach-lookup`
+  grant), but the client process still needs to read the keychain list
+  metadata to know which keychain to ask about. Without this, claude
+  reports "Not logged in · Please run /login" inside the sandbox even
+  when the user is in fact authenticated on the host. Fixes the only
+  way claude OAuth (the default for Claude Code 2.x) works under ora.
+- Profile now re-allows `/etc/ssl/cert.pem` and `/private/etc/ssl/cert.pem`
+  as literals AFTER the global `*.pem` regex deny. The deny is intended
+  for user-controlled private-key PEMs; the system trust store is a
+  public, root-owned certificate bundle that several CLIs (codex, any
+  OpenSSL-using tool with `SSL_CERT_FILE`) need to validate TLS chains.
+- `defaultAllowedDomains` now includes `chatgpt.com` (codex's new
+  `chatgpt.com/backend-api/codex/responses` endpoint) and
+  `mcp-proxy.anthropic.com` (Claude Code's MCP relay). Without these,
+  the relevant CLIs hit `[SANDBOX DENIED] network policy boundary` on
+  the very first API call.
+- `pkg/sandbox.DetectNodeBinDir` now follows two new kinds of binary
+  indirection:
+    * **Shell-script wrapper chain.** When the provider binary is a
+      shebang script, the function searches PATH (skipping the script's
+      own dir) for the next executable with the same provider name and
+      adds that dir too — recursively up to 5 hops, with cycle
+      detection. This unblocks pass-through wrappers (Anthropic's
+      Superset agent shims, asdf/`rtx` shims, `direnv`-style proxies)
+      that exec the next PATH match.
+    * **Wrapper-companion `hooks/` sibling.** When a wrapper script
+      lives at `<root>/bin/<name>`, the function also grants read on
+      `<root>/hooks` (when it exists and is under a safe binary root).
+      Some wrapper conventions (Superset, in particular) ship lifecycle
+      hook scripts there that the wrapped CLI tries to spawn during
+      its run; without read access on the hook scripts those spawn
+      calls return EPERM and emit non-fatal warnings every invocation.
+  The function signature gained a `providerName` parameter (pass `""`
+  to disable script-delegate following). Both new behaviors gate the
+  resolved dir through the existing `isSafeBinaryRoot` allowlist so a
+  rogue PATH entry can't drag an unrelated subtree into the read-allow
+  set.
+- `pkg/sandbox.findNextPathMatch` (internal) canonicalizes both PATH
+  entries and the skip dir via `filepath.EvalSymlinks` before comparing.
+  Without this, on macOS the `/var → /private/var` rewrite makes a
+  wrapper sitting in a tmpdir compare as different from its own PATH
+  entry and the function returns the wrapper itself instead of the next
+  match.
+
+### Changed
+
+- `pkg/sandbox.ProfileOptions.NodeBinDir` (string) → `NodeBinDirs` ([]string).
+  Out-of-tree embedders constructing `ProfileOptions` directly need to wrap
+  their existing single path in a slice.
+- `pkg/sandbox.DetectNodeBinDir(providerBin string, logger *slog.Logger)
+  string` → `DetectNodeBinDir(providerBin, providerName, home string,
+  logger *slog.Logger) []string`. Pass `""` for `home` to skip the
+  HOME-subtree match; pass `""` for `providerName` to skip the
+  shell-wrapper PATH-chase.
+
 ## [0.1.0] - 2026-04-27
 
 Initial public release. `ora` wraps an AI coding CLI in a per-invocation

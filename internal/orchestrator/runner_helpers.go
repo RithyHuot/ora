@@ -159,7 +159,7 @@ func (r *Runner) buildAndWriteProfile(sess *session.Session, home string, writab
 		WritablePaths:     writable,
 		AuthDirsRW:        rw,
 		AuthDirsRO:        ro,
-		NodeBinDir:        sandbox.DetectNodeBinDir(r.Bin, r.Logger),
+		NodeBinDirs:       sandbox.DetectNodeBinDir(r.Bin, r.ProviderName, home, r.Logger),
 		HomebrewRoots:     sandbox.DetectHomebrewRoots(r.Logger),
 		VersionMgrDirs:    sandbox.DetectVersionMgrDirs(home, r.Logger),
 		AllowUnixSockets:  r.Config.AllowUnixSockets,

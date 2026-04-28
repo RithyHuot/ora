@@ -77,33 +77,288 @@ func DetectVersionMgrDirs(home string, logger *slog.Logger) []string {
 	return ExistingPaths(dirs, logger)
 }
 
-// DetectNodeBinDir returns the directory containing the active node binary,
-// derived from os.Executable for go-managed processes or PATH lookup. The
-// caller passes the resolved provider binary; this helper takes its dirname
-// so the sandbox can read the node interpreter.
+// DetectNodeBinDir returns the directories that need read access for the
+// provider binary to load. The list always begins with filepath.Dir(providerBin)
+// (the unresolved dirname) so the node interpreter sibling stays reachable,
+// and may include up to a handful of additional dirs when providerBin is one
+// or more hops away from the actual binary that gets exec'd.
 //
-// On EvalSymlinks failure (e.g. dangling symlink, permission error), falls
-// back to the unresolved path's dirname and logs a warning. Pass nil for
-// logger to use slog.Default().
-func DetectNodeBinDir(providerBin string, logger *slog.Logger) string {
+// The function traces a launch chain of up to 5 hops, following two kinds of
+// indirection at each step:
+//
+//  1. Symlink resolution: when providerBin (or a previous hop) is a symlink
+//     whose target lies under a "safe" root (HOME, /usr, /opt/homebrew,
+//     /opt/local), the resolved dirname is added and the chain continues
+//     from the resolved path. Required for installer layouts where the
+//     entry point lives outside the bin dir (Anthropic claude, nvm/asdf
+//     Node CLIs).
+//  2. Shell-script delegation: when a hop is a `#!`-prefixed script,
+//     providerName is searched on PATH (skipping the script's own
+//     directory) and the next executable match becomes the next hop. This
+//     handles pass-through wrappers (Superset agent shims, asdf shims,
+//     direnv-style wrappers) that exec the next binary on PATH with the
+//     same name.
+//
+// Resolutions to unsafe targets (e.g. /, /etc) are dropped with a warning
+// to defend against rogue symlinks that would otherwise let an attacker
+// whitelist a sensitive subtree by planting a symlink in the user's PATH.
+// PATH searches use the normal isSafeBinaryRoot allowlist on the resulting
+// dirname for the same reason — a malicious PATH entry pointing at /etc
+// cannot drag /etc into the read-allow set.
+//
+// providerName is the canonical CLI name (e.g. "claude", "gemini") used
+// for PATH lookup during script-wrapper resolution. Pass "" to disable
+// script-delegate following (only symlink chasing will run).
+//
+// home is used to recognize the user's home subtree as safe; pass "" to
+// disable that match. Pass nil for logger to use slog.Default().
+func DetectNodeBinDir(providerBin, providerName, home string, logger *slog.Logger) []string {
 	if providerBin == "" {
-		return ""
+		return nil
 	}
 	if logger == nil {
 		logger = slog.Default()
 	}
-	resolved, err := filepath.EvalSymlinks(providerBin)
+	const maxHops = 5
+	out := []string{}
+	seen := map[string]struct{}{}
+	add := func(dir string) {
+		clean := filepath.Clean(dir)
+		if clean == "" || clean == "." {
+			return
+		}
+		if _, dup := seen[clean]; dup {
+			return
+		}
+		seen[clean] = struct{}{}
+		out = append(out, clean)
+	}
+
+	visited := map[string]struct{}{}
+	cur := providerBin
+	for hop := 0; hop < maxHops && cur != ""; hop++ {
+		// Cycle break: a malicious or pathological PATH (A→B→A wrappers, or
+		// a symlink that loops back) would otherwise consume all maxHops
+		// hops without progress. Output dedup via `seen` only catches
+		// duplicate dirs; we also need to break on a duplicate visited
+		// path. Compare on the raw `cur` rather than EvalSymlinks output —
+		// we already follow symlinks below, so by the time we revisit a
+		// path it's the literal same string.
+		if _, loop := visited[cur]; loop {
+			break
+		}
+		visited[cur] = struct{}{}
+
+		add(filepath.Dir(cur))
+
+		info, err := os.Lstat(cur)
+		if err != nil {
+			logger.Warn("DetectNodeBinDir: lstat failed; using unresolved path",
+				"path", cur, "err", err)
+			break
+		}
+
+		if info.Mode()&os.ModeSymlink != 0 {
+			resolved, rerr := filepath.EvalSymlinks(cur)
+			if rerr != nil {
+				logger.Warn("DetectNodeBinDir: EvalSymlinks failed; using unresolved path",
+					"path", cur, "err", rerr)
+				break
+			}
+			resolvedDir := filepath.Dir(resolved)
+			if filepath.Clean(resolvedDir) != filepath.Clean(filepath.Dir(cur)) {
+				if !isSafeBinaryRoot(resolvedDir, home) {
+					logger.Warn("DetectNodeBinDir: resolved path under unsafe root; ignoring",
+						"path", cur, "resolved", resolved)
+					break
+				}
+				add(resolvedDir)
+			}
+			cur = resolved
+			continue
+		}
+
+		// Regular file. If it has a shebang, look for the next-match on PATH
+		// — pass-through wrappers (Superset, asdf shims) call out via PATH.
+		if providerName != "" && isShellScript(cur) {
+			// Wrapper-layout heuristic: if the script lives in <root>/bin/,
+			// some wrappers (notably Superset) ship companion lifecycle hook
+			// scripts at <root>/hooks/ that the wrapped CLI tries to spawn
+			// during its run (gemini-cli's BeforeAgent/AfterAgent, etc.).
+			// Without read+exec on <root>/hooks/ those spawn calls return
+			// EPERM and the CLI logs noisy non-fatal warnings on every run.
+			// Process-exec is already broadly allowed; we just need the
+			// hook scripts to be readable. Add the sibling dir before
+			// chasing the delegate so it gets included even if the delegate
+			// is on a different root.
+			if hooksDir := wrapperHooksSibling(cur, home); hooksDir != "" {
+				add(hooksDir)
+			}
+			delegate := findNextPathMatch(providerName, filepath.Dir(cur))
+			if delegate == "" {
+				break
+			}
+			delegateDir := filepath.Dir(delegate)
+			if !isSafeBinaryRoot(delegateDir, home) {
+				logger.Warn("DetectNodeBinDir: script delegate under unsafe root; ignoring",
+					"path", cur, "delegate", delegate)
+				break
+			}
+			cur = delegate
+			continue
+		}
+
+		// Plain native binary. Chain ends here.
+		break
+	}
+	return out
+}
+
+// isShellScript reports whether path begins with the `#!` shebang marker.
+// Returns false on any I/O error (caller treats unreadable as non-script).
+func isShellScript(path string) bool {
+	f, err := os.Open(path) //nolint:gosec // path is the provider-binary already validated upstream
 	if err != nil {
-		logger.Warn("DetectNodeBinDir: EvalSymlinks failed; using unresolved path",
-			"path", providerBin, "err", err)
-		return filepath.Dir(providerBin)
+		return false
 	}
-	if isSymlinkOutsideBoundary(providerBin, resolved) {
-		logger.Warn("DetectNodeBinDir: resolved symlink escapes boundary; falling back to unresolved dirname",
-			"path", providerBin, "resolved", resolved)
-		return filepath.Dir(providerBin)
+	defer func() { _ = f.Close() }()
+	var buf [2]byte
+	n, _ := f.Read(buf[:])
+	return n == 2 && buf[0] == '#' && buf[1] == '!'
+}
+
+// findNextPathMatch returns the first executable file named `name` on PATH
+// whose containing directory is NOT skipDir. Returns "" if no match exists,
+// PATH is unset, or every match lives in skipDir. Used by DetectNodeBinDir
+// to follow pass-through script wrappers to the binary they delegate to.
+//
+// Matches the shell-builtin `command -v` semantics: stops at the first
+// executable, ignores directories named `name`, follows PATH order, and
+// silently skips PATH entries it can't stat.
+//
+// skipDir is canonicalized via EvalSymlinks (with a fall-through to a plain
+// filepath.Clean on error) before comparison, so /var/foo and the
+// /private/var/foo it canonicalizes to count as the same dir on macOS. PATH
+// entries are canonicalized the same way. Without this, a wrapper sitting
+// in a tmpdir on macOS would compare as a different dir from its own PATH
+// entry and the function would return the wrapper itself — defeating the
+// "find the *next* match" semantics.
+func findNextPathMatch(name, skipDir string) string {
+	pathEnv := os.Getenv("PATH")
+	if pathEnv == "" {
+		return ""
 	}
-	return filepath.Dir(resolved)
+	skip := canonicalizeDir(skipDir)
+	for _, dir := range filepath.SplitList(pathEnv) {
+		if dir == "" {
+			continue
+		}
+		if canonicalizeDir(dir) == skip {
+			continue
+		}
+		candidate := filepath.Join(dir, name)
+		info, err := os.Stat(candidate)
+		if err != nil {
+			continue
+		}
+		if info.IsDir() {
+			continue
+		}
+		if info.Mode()&0o111 == 0 {
+			continue
+		}
+		return candidate
+	}
+	return ""
+}
+
+// wrapperHooksSibling implements a narrow heuristic: if scriptPath sits at
+// <root>/bin/<name>, return <root>/hooks (cleaned) when that directory
+// exists and lies under a safe binary root. Returns "" otherwise.
+//
+// This pattern is shared by user-script wrapper conventions (Superset
+// agent shims, some asdf-style "shim + hooks" trees) where the wrapped
+// CLI invokes lifecycle hook scripts that live as siblings of the bin
+// dir. The hooks themselves are user-controlled scripts, so granting
+// read on the dir is no broader than the existing HOME / safe-root
+// trust assumptions; without it the wrapped CLI logs spurious EPERM
+// warnings on every invocation.
+func wrapperHooksSibling(scriptPath, home string) string {
+	binDir := filepath.Dir(scriptPath)
+	if filepath.Base(binDir) != "bin" {
+		return ""
+	}
+	root := filepath.Dir(binDir)
+	if root == "" || root == "/" || root == "." {
+		return ""
+	}
+	hooks := filepath.Join(root, "hooks")
+	info, err := os.Stat(hooks)
+	if err != nil || !info.IsDir() {
+		return ""
+	}
+	if !isSafeBinaryRoot(hooks, home) {
+		return ""
+	}
+	return hooks
+}
+
+// canonicalizeDir returns filepath.EvalSymlinks(p) on success, or
+// filepath.Clean(p) when EvalSymlinks fails (e.g. ENOENT, permission denied).
+// Used to compare two directories that may differ only in macOS canonical
+// path rewrites (/tmp → /private/tmp, /var → /private/var).
+func canonicalizeDir(p string) string {
+	if p == "" {
+		return ""
+	}
+	resolved, err := filepath.EvalSymlinks(p)
+	if err != nil {
+		return filepath.Clean(p)
+	}
+	return resolved
+}
+
+// isSafeBinaryRoot reports whether p is under a root we will accept as a
+// resolved-symlink target for a provider binary. Used by DetectNodeBinDir
+// to decide whether to grant file-read on the resolved dirname.
+//
+// Safe:
+//   - HOME (the user already controls everything here; subtree access is
+//     gated elsewhere by per-provider auth dirs and mandatory denies)
+//   - /usr, /opt/homebrew, /opt/local — system or sysadmin-managed roots
+//     already covered by other allows; redundant grants are harmless
+//
+// /Applications is intentionally excluded: it is mode 0775 group:admin on
+// stock macOS, and the primary user account is in the admin group, so an
+// unsandboxed supply-chain compromise (e.g. a malicious `npm install`)
+// could plant a binary there and a symlink in PATH pointing at it. Granting
+// the resolved dirname read access in that case would let the planted
+// payload read arbitrary content from `/Applications/<plant>/...` on the
+// next ora run. The cost of not allowing it is negligible (developer tools
+// almost never live in `/Applications/<X>/Contents/MacOS`); the cost of
+// allowing it is a confused-deputy on a directory the attacker controls.
+//
+// Unsafe (returns false): /, /etc, /var, /private (other than /private/tmp,
+// which a provider binary should never legitimately resolve into), or any
+// other path. The intent is to refuse a symlink whose resolved target would
+// effectively whitelist an unrelated subtree.
+func isSafeBinaryRoot(p, home string) bool {
+	p = filepath.Clean(p)
+	if p == "" || p == "/" {
+		return false
+	}
+	if home != "" {
+		cleanHome := filepath.Clean(home)
+		if p == cleanHome || strings.HasPrefix(p, cleanHome+"/") {
+			return true
+		}
+	}
+	for _, root := range []string{"/usr", "/opt/homebrew", "/opt/local"} {
+		if p == root || strings.HasPrefix(p, root+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 // isSymlinkOutsideBoundary returns true when resolved is not within the

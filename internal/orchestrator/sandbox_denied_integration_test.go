@@ -34,7 +34,7 @@ func TestIntegration_StderrClassifierObservesRealSandboxDenial(t *testing.T) {
 	profile, err := sandbox.GenerateProfile(sandbox.ProfileOptions{
 		HomeDir:        tmp, // pretend HOME is the temp dir
 		WritablePaths:  []string{tmp},
-		NodeBinDir:     "/usr/bin",
+		NodeBinDirs:    []string{"/usr/bin"},
 		HomebrewRoots:  sandbox.DetectHomebrewRoots(nil),
 		VersionMgrDirs: nil,
 	})

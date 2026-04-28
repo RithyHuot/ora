@@ -62,13 +62,21 @@ func codexAuthDirs(home string, env map[string]string) []AuthDirEntry {
 	return []AuthDirEntry{{Path: filepath.Join(home, ".codex"), Kind: AuthDirKindDir}}
 }
 
-// opencodeAuthDirs returns BOTH OpenCode locations: config under
-// ~/.config/opencode and credentials under ~/.local/share/opencode/auth.json
-// (XDG_DATA_HOME convention).
+// opencodeAuthDirs returns the four XDG locations OpenCode writes to:
+//
+//   - ~/.config/opencode — config (XDG_CONFIG_HOME)
+//   - ~/.local/share/opencode — credentials at .../auth.json (XDG_DATA_HOME)
+//   - ~/.local/state/opencode — lock files, prompt history (XDG_STATE_HOME)
+//   - ~/.cache/opencode — provider-binary cache (XDG_CACHE_HOME)
+//
+// Without any of these, opencode crashes at startup attempting to mkdir the
+// path it expects to own.
 func opencodeAuthDirs(home string, _ map[string]string) []AuthDirEntry {
 	return []AuthDirEntry{
 		{Path: filepath.Join(home, ".config/opencode"), Kind: AuthDirKindDir},
 		{Path: filepath.Join(home, ".local/share/opencode"), Kind: AuthDirKindDir},
+		{Path: filepath.Join(home, ".local/state/opencode"), Kind: AuthDirKindDir},
+		{Path: filepath.Join(home, ".cache/opencode"), Kind: AuthDirKindDir},
 	}
 }
 
