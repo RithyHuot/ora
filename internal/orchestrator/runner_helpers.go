@@ -94,9 +94,14 @@ func (r *Runner) startLogMonitorIfVerbose(ctx context.Context, verbose bool, wor
 			Path:      ev.Path,
 		}
 		dev.Hint = denials.HintFor(dev, workspaces)
-		// The hint string is composed of literal config keys / env var
-		// names ora itself emits — there is no attacker-controlled
-		// substitution path through HintFor. Safe to print as-is.
+		// HintFor's KindFs branch (hintForPath) returns purely literal
+		// strings — no path substitution, so safe to print as-is. This
+		// invariant holds ONLY for KindFs; KindNetwork hints
+		// (hintForNetwork) interpolate the attacker-controlled host and
+		// would need sanitizeForTerminal before any stderr emit. No such
+		// path exists today (network hints flow only through the JSON
+		// emitter, which encodes control chars), but if you add one,
+		// sanitize first.
 		if dev.Hint != "" {
 			_, _ = fmt.Fprintf(r.stderr(), "[ora-sandbox] hint: %s\n", dev.Hint)
 		}

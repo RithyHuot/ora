@@ -31,15 +31,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cd makes a flag the wrong answer); operational network reasons
   (`tunnel_cap`, `non_443`) and all `KindStderrSignature` events
   return no hint to avoid fabricating advice.
-- Inline `[ora-sandbox] note:` annotation on the wrapped CLI's stderr.
-  When the StderrClassifier sees the first sandbox-signature line
-  (`Operation not permitted`, `Permission denied`, `Read-only file
-  system`) in the child's output, it appends a one-time note pointing
-  at `ora doctor` so a bare denial line doesn't look like a generic
-  system error. Fires in the default-mode stream (without `--verbose`)
-  and even when the wrapped command ultimately exits 0 (e.g. git's
-  non-fatal gitignore warning) — covering the gap where the existing
-  exit-time `[SANDBOX DENIED]` banner only fires on non-zero exit.
+- Inline `[SANDBOX]` annotation on the wrapped CLI's stderr. When the
+  StderrClassifier sees the first sandbox-signature line (`Operation
+  not permitted`, `Permission denied`, `Read-only file system`) in the
+  child's output, it appends a one-time note pointing at `ora doctor`
+  so a bare denial line doesn't look like a generic system error.
+  Fires in the default-mode stream (without `--verbose`) and even when
+  the wrapped command ultimately exits 0 (e.g. git's non-fatal
+  gitignore warning) — covering the gap where the existing exit-time
+  `[SANDBOX DENIED]` banner only fires on non-zero exit. The `[SANDBOX`
+  prefix is shared with the exit-time banner so users can grep for
+  `[SANDBOX` to find every sandbox-emitted line in a run.
 - `pkg/sandbox.ProfilePolicy.AllowWorkspaceDotenv bool` (TOML
   `allow_workspace_dotenv`, env `ORA_ALLOW_WORKSPACE_DOTENV`) — opt-in
   toggle that re-allows read+write on `.env` files inside the

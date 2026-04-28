@@ -45,10 +45,10 @@ func NewStderrClassifier(w io.Writer) *StderrClassifier {
 // raw "Operation not permitted" / "Permission denied" output looks like
 // a generic system error — users miss that ora's sandbox is the cause
 // and try things like `sudo` or alternative paths instead of opting in
-// to the right path/host. Worded as a `note:` (not a banner) because the
-// child may still exit 0 (e.g. git emits the gitignore warning and
-// continues), so we don't want to look like a fatal error.
-const inlineDenialNote = "[ora-sandbox] note: an \"Operation not permitted\" / \"Permission denied\" / \"Read-only file system\" message above is a sandbox denial — see `ora doctor` for opt-ins, or run with --verbose to see which path/host was blocked\n"
+// to the right path/host. The `[SANDBOX]` prefix matches the
+// exit-time `[SANDBOX DENIED]` banner family so users can grep for
+// `[SANDBOX` and find every sandbox-emitted line in their output.
+const inlineDenialNote = "[SANDBOX] the \"Operation not permitted\" / \"Permission denied\" / \"Read-only file system\" message above is a sandbox denial — see `ora doctor` for opt-ins, or run with --verbose to see which path/host was blocked\n"
 
 // Write implements io.Writer. All bytes are forwarded to the underlying
 // writer. The trailing 4 KB of output is scanned for sandbox signatures;

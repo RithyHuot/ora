@@ -60,7 +60,7 @@ func TestStderrClassifier_DetectsReadOnlyFileSystem(t *testing.T) {
 
 // TestStderrClassifier_EmitsInlineNoteOnFirstDenial verifies that the
 // first stderr line containing a sandbox signature triggers a one-time
-// `[ora-sandbox] note:` annotation right after it. Without this, a bare
+// `[SANDBOX]` annotation right after it. Without this, a bare
 // "Operation not permitted" warning from the wrapped CLI looks like a
 // generic system error — users miss that ora's sandbox is the cause and
 // reach for `sudo`. The note is purely informational; the exit-time
@@ -74,14 +74,14 @@ func TestStderrClassifier_EmitsInlineNoteOnFirstDenial(t *testing.T) {
 	if !strings.Contains(got, "Operation not permitted") {
 		t.Fatalf("original line must still pass through; got %q", got)
 	}
-	if !strings.Contains(got, "[ora-sandbox] note:") {
-		t.Errorf("expected `[ora-sandbox] note:` annotation after sandbox-signature line; got %q", got)
+	if !strings.Contains(got, "[SANDBOX]") {
+		t.Errorf("expected `[SANDBOX]` annotation after sandbox-signature line; got %q", got)
 	}
 	if !strings.Contains(got, "ora doctor") {
 		t.Errorf("annotation should point at `ora doctor`; got %q", got)
 	}
 	// Annotation must appear AFTER the matched line, not before.
-	noteIdx := strings.Index(got, "[ora-sandbox] note:")
+	noteIdx := strings.Index(got, "[SANDBOX]")
 	denyIdx := strings.Index(got, "Operation not permitted")
 	if noteIdx < denyIdx {
 		t.Errorf("annotation must come after the matched line (deny=%d, note=%d)", denyIdx, noteIdx)
@@ -98,7 +98,7 @@ func TestStderrClassifier_InlineNoteFiresOnce(t *testing.T) {
 	for range 5 {
 		_, _ = c.Write([]byte("foo: Operation not permitted\n"))
 	}
-	count := strings.Count(buf.String(), "[ora-sandbox] note:")
+	count := strings.Count(buf.String(), "[SANDBOX]")
 	if count != 1 {
 		t.Errorf("annotation must fire exactly once; got %d occurrences in %q", count, buf.String())
 	}
@@ -113,7 +113,7 @@ func TestStderrClassifier_NoNoteWhenNoDenial(t *testing.T) {
 
 	_, _ = c.Write([]byte("compiling foo.c...\n"))
 	_, _ = c.Write([]byte("link succeeded\n"))
-	if strings.Contains(buf.String(), "[ora-sandbox]") {
+	if strings.Contains(buf.String(), "[SANDBOX") {
 		t.Errorf("annotation must not fire on benign output; got %q", buf.String())
 	}
 }
