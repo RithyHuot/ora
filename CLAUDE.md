@@ -100,7 +100,7 @@ When a change touches the categories below, update the corresponding doc in the 
 
 | If you change… | Update |
 |---|---|
-| Add/remove/rename an exported `pkg/` symbol (function, type, struct field, constant) | `docs/STABILITY.md` — "Stable" list under the right `pkg/` heading. Breaking renames or signature changes also go in `docs/STABILITY.md` "Recent breaking changes (pre-1.0)". |
+| Add/remove/rename an exported `pkg/` symbol (function, type, struct field, constant) | `docs/STABILITY.md` — "Stable" list under the right `pkg/` heading, **and** bump the "last reconciled" date in the `Audit log` section at the bottom. Breaking renames or signature changes also go in "Recent breaking changes (pre-1.0)". |
 | Add/remove/modify a path-allow or path-deny in the generated profile | `docs/ARCHITECTURE.md` — "Profile anatomy" → Layer 2 (allows) or Layer 3 (denies). Mention *why* the grant exists (which CLI / call needs it) — that's what readers come for. |
 | Fix a user-visible bug, change CLI behavior, add a feature, or change defaults | `CHANGELOG.md` `[Unreleased]` — `### Fixed` / `### Added` / `### Changed`. Match the existing prose style: explain the *why* and the *symptom*, not just the diff. |
 | Add a config knob (env var, `.ora.toml` field, CLI flag) | `docs/CONFIGURATION.md` plus `CHANGELOG.md` `### Added`. |
@@ -108,8 +108,19 @@ When a change touches the categories below, update the corresponding doc in the 
 | Add/change error handling or exit-code semantics | `docs/SANDBOX_ERROR_BEHAVIOR.md`. |
 | Add a new provider | `pkg/providers/registry.go` + tests; the `## Adding a new provider` section above already lists the hot path. No separate doc, but mention in `CHANGELOG.md` `### Added`. |
 | Change release tooling, goreleaser config, or CI | `docs/RELEASE.md`. |
+| Edit an example in the README's "Denied by default" / allow tables | Verify the example path is actually denied/allowed by the current profile before merging — run `ora policy show` or check `pkg/sandbox/profile.go` and `DefaultPolicy()`. The default `/tmp` allow tripped this once: `echo x > /tmp/outside` looks denied but isn't. |
 
 If a change crosses multiple categories (e.g. a fix that adds a new exported helper and changes the profile), update each doc — they exist for different audiences (embedders read STABILITY, operators read ARCHITECTURE, users read CHANGELOG).
+
+### When tagging a release
+
+Tagging `vX.Y.Z` is not just `git tag`. In the same commit (or release PR):
+
+1. Cut `CHANGELOG.md` `[Unreleased]` into a dated `## [X.Y.Z] - YYYY-MM-DD` section. Leave `[Unreleased]` as just the header (no `### Added` / `### Fixed` subsections) until the next user-visible change lands.
+2. Add a compare-link ref at the bottom: `[X.Y.Z]: https://github.com/rithyhuot/ora/releases/tag/vX.Y.Z`. Update the `[Unreleased]` ref to compare against the new tag: `compare/vX.Y.Z...HEAD`.
+3. Bump `VERSION=vX.Y.Z` shell examples in `README.md` (cosign-verify block, install snippets) so copy-paste users land on a real release.
+
+Skipping any of these is what makes `[Unreleased]` grow into a multi-release blob — v0.2.0 / v0.2.1 / v0.2.2 all shipped without cutting, and the catch-up was a separate doc PR. Cut at tag time, not later.
 
 ## Linter notes
 

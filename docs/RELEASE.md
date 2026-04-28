@@ -96,6 +96,8 @@ Each release produces:
 | `ora_vX.Y.Z_darwin_arm64.tar.gz` | Apple Silicon binary |
 | `checksums.txt` | SHA256 checksums |
 | `checksums.txt.bundle` | Cosign signature bundle for verifying `checksums.txt` |
+| `ora_vX.Y.Z_darwin_amd64.tar.gz.sbom.json` | Syft SBOM (SPDX JSON) for the Intel archive |
+| `ora_vX.Y.Z_darwin_arm64.tar.gz.sbom.json` | Syft SBOM (SPDX JSON) for the Apple Silicon archive |
 
 Both archives contain:
 - `ora` — the compiled binary
@@ -115,3 +117,12 @@ Integration tests require macOS + `sandbox-exec`. They are skipped on non-darwin
 ### Draft release not created
 
 GoReleaser creates drafts by default (see `.goreleaser.yml: draft: true`). You must manually publish the release on GitHub.
+
+### `exec: "syft": executable file not found in $PATH` (or same for `cosign`)
+
+`.goreleaser.yml` declares per-archive SBOMs (`sboms:`) and keyless cosign
+signing of `checksums.txt` (`signs:`). Both shell out to external binaries
+that goreleaser does not install for you. The release workflow installs
+them via `anchore/sbom-action/download-syft@v0` and
+`sigstore/cosign-installer@v3` before the goreleaser step — if you fork
+the workflow or run goreleaser locally, install both first.

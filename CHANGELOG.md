@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Release workflow failed at the SBOM step with
+  `exec: "syft": executable file not found in $PATH` (and would have failed
+  next at `cosign` for the same reason). `.goreleaser.yml` declares both
+  `sboms:` and a keyless `signs:` block, but `.github/workflows/release.yml`
+  only installed Go and goreleaser itself. The release job now runs
+  `anchore/sbom-action/download-syft` and `sigstore/cosign-installer`
+  before invoking goreleaser so both external binaries are on `$PATH`.
+
+## [0.2.2] - 2026-04-28
+
 ### Added
 
 - `pkg/sandbox.DetectActiveDeveloperDir(logger)` — reads
@@ -44,6 +56,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cleanly, and exposing only `<bundle>/Contents/Developer` would
   actively break the fallback by making xcselect prefer the Xcode dev
   dir and then fail loading sibling frameworks.
+
+## [0.2.1] - 2026-04-28
+
+### Fixed
+
 - `ora --version` reported `dev` for binaries installed via
   `go install github.com/rithyhuot/ora/cmd/ora@vX.Y.Z` (the README's
   recommended path). `go install` does not honor the Makefile's
@@ -53,6 +70,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   binaries report the tag they were installed at, working-tree builds
   (`(devel)`) keep reporting `dev`, and Makefile / goreleaser builds are
   unaffected because their ldflags-set value still wins.
+
+## [0.2.0] - 2026-04-28
+
+### Fixed
+
 - macOS 26 (Tahoe) path-traversal regression: the kernel now evaluates each
   path component independently when the wrapped CLI calls `lstat` /
   `realpathSync`. The profile previously granted `(literal "/")` and
@@ -387,5 +409,8 @@ See `docs/STABILITY.md` for the full v1.x stable surface.
   rendering or launching a browser process will fail inside the sandbox.
 - Python `multiprocessing` via named POSIX semaphores is not granted.
 
-[Unreleased]: https://github.com/rithyhuot/ora/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/rithyhuot/ora/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/rithyhuot/ora/releases/tag/v0.2.2
+[0.2.1]: https://github.com/rithyhuot/ora/releases/tag/v0.2.1
+[0.2.0]: https://github.com/rithyhuot/ora/releases/tag/v0.2.0
 [0.1.0]: https://github.com/rithyhuot/ora/releases/tag/v0.1.0

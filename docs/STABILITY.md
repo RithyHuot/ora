@@ -131,7 +131,7 @@ wrapped CLI to die at runtime when trying to read its own executable.
 
 ## Audit log
 
-This document was last reconciled against `go doc -all` on 2026-04-27.
+This document was last reconciled against `go doc -all` on 2026-04-28.
 When making any change to a `pkg/` exported symbol, update this file in
 the same commit. Run `go doc -all ./pkg/...` and grep against this file
 to catch drift.
