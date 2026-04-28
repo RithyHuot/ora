@@ -72,7 +72,7 @@ Each release ships a `checksums.txt` and a cosign signature bundle.
 To verify before installing:
 
 ```sh
-VERSION=v0.2.2
+VERSION=v0.2.3
 curl -LO https://github.com/rithyhuot/ora/releases/download/$VERSION/checksums.txt
 curl -LO https://github.com/rithyhuot/ora/releases/download/$VERSION/checksums.txt.bundle
 cosign verify-blob \
