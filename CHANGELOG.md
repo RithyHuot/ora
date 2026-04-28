@@ -69,6 +69,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ora doctor --probe` now includes the invoked provider's
   `AllowedDomains` in the egress allowlist when probing, matching the
   runtime path.
+- `internal/orchestrator.Runner` now applies the invoked provider's
+  `EnvDefaults` to the parent env BEFORE `internal/exec.BuildSpawnEnv`
+  runs, instead of after. This ensures provider-supplied defaults are
+  subject to the same `alwaysStripKeys` pass as inherited parent env —
+  an out-of-tree (or future hostile/misconfigured builtin) provider
+  setting `EnvDefaults["NODE_OPTIONS"]` (or `DYLD_INSERT_LIBRARIES`,
+  `BASH_ENV`, `PYTHONSTARTUP`, …) can no longer bypass loader-hook
+  stripping by re-introducing a value after the strip pass. Builtins
+  are clean today; this closes the unguarded invariant. The "user
+  value wins" semantic is preserved — defaults are skipped for keys
+  already set in the input env.
+- `pkg/providers` now validates every builtin `AllowedDomains` entry
+  at package init via `proxy.ValidateAllowedDomain`. A typo, embedded
+  scheme/port, or bare-wildcard entry on a builtin spec now panics
+  immediately at startup instead of waiting for the test suite to
+  catch it. `Register()` already validated out-of-tree specs the same
+  way; this closes the gap where builtins skipped that path. Matches
+  ora's fail-closed posture for sandbox / egress invariants.
 
 ### Fixed
 
