@@ -162,6 +162,61 @@ func TestGenerateProfile_GitconfigAllowedReadOnly(t *testing.T) {
 	}
 }
 
+// TestGenerateProfile_XdgGitconfigAllowedReadOnly verifies that
+// ~/.config/git is granted as a read-only subpath when the gitconfig
+// allow is in effect (default). XDG is the modern path git falls back
+// to when ~/.gitconfig is absent, and is the canonical home for
+// `core.excludesfile` (~/.config/git/ignore) and `attributes`.
+func TestGenerateProfile_XdgGitconfigAllowedReadOnly(t *testing.T) {
+	got, err := GenerateProfile(baseOpts())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, `(allow file-read* (subpath "/Users/alice/.config/git"))`) {
+		t.Errorf("expected ~/.config/git subpath read allow when DenyHomeGitconfig=false (zero value)")
+	}
+}
+
+// TestGenerateProfile_DeniesXdgGitCredentials verifies that even with
+// the ~/.config/git subpath read allow above, the credentials helper
+// store at ~/.config/git/credentials is denied — matching the existing
+// ~/.git-credentials literal deny. The deny must be emitted AFTER the
+// subpath allow so it wins under Seatbelt's last-match-wins semantics.
+func TestGenerateProfile_DeniesXdgGitCredentials(t *testing.T) {
+	got, err := GenerateProfile(baseOpts())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `(deny file-read* file-write* (literal "/Users/alice/.config/git/credentials"))`
+	if !strings.Contains(got, want) {
+		t.Errorf("expected credentials deny %q — git credential helper output must not be readable", want)
+	}
+	allowIdx := strings.Index(got, `(allow file-read* (subpath "/Users/alice/.config/git"))`)
+	denyIdx := strings.Index(got, want)
+	if allowIdx < 0 || denyIdx < 0 || denyIdx < allowIdx {
+		t.Errorf("credentials deny must appear after the ~/.config/git subpath allow (allow=%d, deny=%d)", allowIdx, denyIdx)
+	}
+}
+
+// TestGenerateProfile_DenyHomeGitconfigOmitsXdgPath verifies that the
+// existing DenyHomeGitconfig switch covers both ~/.gitconfig (legacy)
+// and ~/.config/git (XDG). Stricter sandboxes should not silently leak
+// global git settings via the XDG path when the legacy one is denied.
+func TestGenerateProfile_DenyHomeGitconfigOmitsXdgPath(t *testing.T) {
+	o := baseOpts()
+	o.Policy.DenyHomeGitconfig = true
+	got, err := GenerateProfile(o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(got, `(allow file-read* (literal "/Users/alice/.gitconfig"))`) {
+		t.Errorf("expected ~/.gitconfig allow to be omitted when DenyHomeGitconfig=true")
+	}
+	if strings.Contains(got, `(allow file-read* (subpath "/Users/alice/.config/git"))`) {
+		t.Errorf("expected ~/.config/git allow to be omitted when DenyHomeGitconfig=true")
+	}
+}
+
 func TestGenerateProfile_EmitsKeychainsRead(t *testing.T) {
 	// macOS Keychain access (used by claude OAuth) needs read on the
 	// keychain DB files; the actual decrypt happens via securityd XPC,
@@ -508,6 +563,102 @@ func TestGenerateProfile_AllowsGitConfigWhenOptIn(t *testing.T) {
 	}
 }
 
+// TestGenerateProfile_DeniesWorkspaceDotenvByDefault verifies that the
+// global *.env regex deny still fires for files inside the workspace
+// when AllowWorkspaceDotenv=false (the secure default). The deny is
+// what blocks `git reset --hard` and `git checkout` from materializing
+// committed .env files.
+func TestGenerateProfile_DeniesWorkspaceDotenvByDefault(t *testing.T) {
+	o := baseOpts()
+	o.Policy.AllowWorkspaceDotenv = false
+	got, err := GenerateProfile(o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Global mandatory regex must always be present.
+	if !strings.Contains(got, `(deny file-read* file-write* (regex #"^.*\.env$"))`) {
+		t.Errorf("global *.env regex deny is missing — secret-leak protection regressed")
+	}
+	// And NO workspace re-allow when the flag is off.
+	if strings.Contains(got, `(allow file-read* file-write* (regex #"^/Users/alice/code/proj/.*\.env$"))`) {
+		t.Errorf("expected NO workspace .env re-allow when AllowWorkspaceDotenv=false")
+	}
+}
+
+// TestGenerateProfile_ReAllowsWorkspaceDotenvWhenOptIn verifies that
+// AllowWorkspaceDotenv=true emits a regex re-allow for .env files
+// scoped to each writable workspace path, and that the re-allow is
+// emitted AFTER the global mandatory regex deny so Seatbelt's
+// last-match-wins semantics let the workspace-scoped allow override.
+func TestGenerateProfile_ReAllowsWorkspaceDotenvWhenOptIn(t *testing.T) {
+	o := baseOpts()
+	o.Policy.AllowWorkspaceDotenv = true
+	got, err := GenerateProfile(o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Global deny still emitted (we don't remove it; we override).
+	denyIdx := strings.Index(got, `(deny file-read* file-write* (regex #"^.*\.env$"))`)
+	if denyIdx < 0 {
+		t.Fatalf("global *.env regex deny missing from profile — must remain to block .env files outside the workspace")
+	}
+	want := `(allow file-read* file-write* (regex #"^/Users/alice/code/proj/.*\.env$"))`
+	allowIdx := strings.Index(got, want)
+	if allowIdx < 0 {
+		t.Errorf("profile missing workspace .env re-allow %q", want)
+	}
+	if allowIdx >= 0 && allowIdx < denyIdx {
+		t.Errorf("workspace .env re-allow must appear AFTER global *.env deny (allow=%d, deny=%d) — last-match-wins requires the allow to come last", allowIdx, denyIdx)
+	}
+}
+
+// TestGenerateProfile_AllowWorkspaceDotenv_NormalizesTrailingSlash
+// verifies that workspace paths with a trailing slash (which can
+// reach the profile via project `.ora.toml` extra_writable entries —
+// buildWritablePaths does not normalize them) still produce a
+// well-formed regex. Without filepath.Clean, the pattern would be
+// `^/path//.*\.env$` and silently fail to match real `/path/foo.env`
+// requests, leaving the user's opt-in inert.
+func TestGenerateProfile_AllowWorkspaceDotenv_NormalizesTrailingSlash(t *testing.T) {
+	o := baseOpts()
+	o.Policy.AllowWorkspaceDotenv = true
+	o.WritablePaths = []string{"/Users/alice/code/proj/"}
+	got, err := GenerateProfile(o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `(allow file-read* file-write* (regex #"^/Users/alice/code/proj/.*\.env$"))`
+	if !strings.Contains(got, want) {
+		t.Errorf("trailing-slash workspace must emit normalized pattern %q", want)
+	}
+	if strings.Contains(got, `^/Users/alice/code/proj//.*\.env$`) {
+		t.Errorf("emitted regex must not contain a doubled slash — would fail to match real paths")
+	}
+}
+
+// TestGenerateProfile_AllowWorkspaceDotenv_KeepsEnvrcDenied verifies
+// that opting in to .env does NOT relax the .envrc deny. .envrc is a
+// direnv RCE primitive (sourced on next cd into the workspace);
+// re-allowing it would let a sandboxed agent plant code that runs
+// outside the sandbox. The flag's name and docs are scoped to .env
+// only — anyone who needs .envrc takes a separate, louder opt-in.
+func TestGenerateProfile_AllowWorkspaceDotenv_KeepsEnvrcDenied(t *testing.T) {
+	o := baseOpts()
+	o.Policy.AllowWorkspaceDotenv = true
+	got, err := GenerateProfile(o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, `(deny file-read* file-write* (regex #"^.*/\.envrc$"))`) {
+		t.Errorf("global .envrc deny must remain even with AllowWorkspaceDotenv=true")
+	}
+	// No workspace .envrc re-allow should be emitted under this flag.
+	if strings.Contains(got, `(allow file-read* file-write* (regex #"^/Users/alice/code/proj/.*\.envrc"))`) ||
+		strings.Contains(got, `(allow file-read* file-write* (regex #"^/Users/alice/code/proj/.*/\.envrc$"))`) {
+		t.Errorf("AllowWorkspaceDotenv must not re-allow .envrc — that's a separate, louder flag")
+	}
+}
+
 func TestGenerateProfile_AuthDirRO_EmitsReadOnly(t *testing.T) {
 	o := baseOpts()
 	o.AuthDirsRW = nil
@@ -827,14 +978,22 @@ func TestGenerateProfile_AuthDirEntryFileUsesLiteral(t *testing.T) {
 // Line Tools install dialog. Both /var/... and /private/var/... forms
 // are required because seatbelt matches on the syscall-supplied path
 // rather than the firmlink-resolved canonical.
+//
+// /var/select/sh is the same BSD-select mechanism applied to the system
+// shell. Git shells out via sh for hooks, pager, aliases, and (notably)
+// `git reset --hard` worktree rebuilds; without read access the spawn
+// path produces "Error opening /private/var/select/sh: Operation not
+// permitted" and the operation aborts.
 var xcodeSelectLinkLiterals = []string{
 	`(allow file-read* (literal "/var"))`,
 	`(allow file-read* (literal "/var/select"))`,
 	`(allow file-read* (literal "/var/select/developer_dir"))`,
+	`(allow file-read* (literal "/var/select/sh"))`,
 	`(allow file-read* (literal "/var/db"))`,
 	`(allow file-read* (literal "/var/db/xcode_select_link"))`,
 	`(allow file-read* (literal "/private/var/select"))`,
 	`(allow file-read* (literal "/private/var/select/developer_dir"))`,
+	`(allow file-read* (literal "/private/var/select/sh"))`,
 	`(allow file-read* (literal "/private/var/db"))`,
 	`(allow file-read* (literal "/private/var/db/xcode_select_link"))`,
 }
@@ -847,6 +1006,28 @@ func TestGenerateProfile_EmitsXcodeSelectLinkLiterals(t *testing.T) {
 	for _, want := range xcodeSelectLinkLiterals {
 		if !strings.Contains(got, want) {
 			t.Errorf("profile missing xcode-select link allow %q — /usr/bin/git will trigger the CLT install dialog under sandbox", want)
+		}
+	}
+}
+
+// TestGenerateProfile_EmitsTimezoneSubpath verifies that the profile
+// grants read access to /var/db/timezone (and the /private/var/...
+// twin). On macOS /etc/localtime is a symlink into /var/db/timezone,
+// so without these grants any libc localtime() call resolves the
+// symlink, lands on a denied path, and silently falls back to UTC —
+// breaking timestamps in `git log`, Node `Date()`, Python
+// `datetime.now()`, and similar.
+func TestGenerateProfile_EmitsTimezoneSubpath(t *testing.T) {
+	got, err := GenerateProfile(baseOpts())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`(allow file-read* (subpath "/var/db/timezone"))`,
+		`(allow file-read* (subpath "/private/var/db/timezone"))`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("profile missing timezone allow %q — localtime() will fall back to UTC inside the sandbox", want)
 		}
 	}
 }

@@ -7,6 +7,93 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Denial-hint pipeline. Every `denials.Event` now carries an optional
+  `Hint string` field (`json:"hint,omitempty"`) — a remediation
+  suggestion pointing at the TOML key or env var that would have
+  prevented the denial. Producers (proxy egress, sandbox log monitor)
+  populate it via the new `pkg/denials.HintFor(e Event, workspaces
+  []string) string` resolver. Hints surface in three places:
+  (1) the human `--verbose` stream as a `[ora-sandbox] hint: ...` line
+  immediately under the matching `[ora-sandbox] deny: ...`;
+  (2) the `--json` event stream as a `hint` key (omitted when empty so
+  existing consumers see no change);
+  (3) `ora doctor` prints a static "common opt-ins" cheat sheet
+  even when no denials have happened yet, so users can discover the
+  flags before they hit a wall. The hint table is intentionally small
+  and only covers cases with a real opt-in: workspace `.git/config` →
+  `paths.allow_git_config`, `~/.npmrc` → `ORA_ALLOW_NPMRC` /
+  `paths.allow_npmrc`, workspace `.env` → `ORA_ALLOW_WORKSPACE_DOTENV`
+  / `paths.allow_workspace_dotenv`, non-allowlisted host →
+  `ORA_ALLOWED_DOMAINS` / `egress.extra_domains`. `.envrc` denials
+  intentionally return no hint (no opt-in exists — direnv RCE on next
+  cd makes a flag the wrong answer); operational network reasons
+  (`tunnel_cap`, `non_443`) and all `KindStderrSignature` events
+  return no hint to avoid fabricating advice.
+- Inline `[SANDBOX]` annotation on the wrapped CLI's stderr. When the
+  StderrClassifier sees the first sandbox-signature line (`Operation
+  not permitted`, `Permission denied`, `Read-only file system`) in the
+  child's output, it appends a one-time note pointing at `ora doctor`
+  so a bare denial line doesn't look like a generic system error.
+  Fires in the default-mode stream (without `--verbose`) and even when
+  the wrapped command ultimately exits 0 (e.g. git's non-fatal
+  gitignore warning) — covering the gap where the existing exit-time
+  `[SANDBOX DENIED]` banner only fires on non-zero exit. The `[SANDBOX`
+  prefix is shared with the exit-time banner so users can grep for
+  `[SANDBOX` to find every sandbox-emitted line in a run.
+- `pkg/sandbox.ProfilePolicy.AllowWorkspaceDotenv bool` (TOML
+  `allow_workspace_dotenv`, env `ORA_ALLOW_WORKSPACE_DOTENV`) — opt-in
+  toggle that re-allows read+write on `.env` files inside the
+  workspace, overriding the global `*.env` regex deny. The global deny
+  exists to keep dotenv secrets unreadable to the wrapped CLI by
+  default; the flag narrows the relaxation to files inside the
+  resolved writable workspace path(s) so `git checkout` and `git reset
+  --hard` can materialize committed `.env` files in repos that ship
+  them. The re-allow is emitted as a workspace-anchored regex
+  (`^<workspace>/.*\.env$`) AFTER the mandatory `*.env` regex deny so
+  Seatbelt's last-match-wins semantics let the workspace allow win
+  inside the tree while files outside it stay denied. Does **not**
+  relax `.envrc` — direnv's shell-script format is sourced on the
+  user's next `cd` and is a separate RCE risk class. Default off.
+- The XDG global git config path `~/.config/git/` is now a read-only
+  subpath inside the sandbox, alongside the existing `~/.gitconfig`
+  literal-read allow. Both are gated by the same
+  `Policy.DenyHomeGitconfig` switch (default: allow). Symptom this
+  fixes: `~/.config/git/ignore` was inaccessible, so global gitignore
+  patterns silently didn't apply inside the sandbox, and operations
+  like `git reset --hard` printed `warning: unable to access
+  '/Users/<you>/.config/git/ignore': Operation not permitted`.
+  `~/.config/git/credentials` is now in the mandatory home literal
+  deny list alongside `~/.git-credentials` — read-only access to a
+  credential helper store still leaks the token, so the deny is
+  emitted after the subpath allow and overrides it under Seatbelt's
+  last-match-wins semantics.
+
+### Fixed
+
+- `/var/select/sh` and `/private/var/select/sh` are now in the
+  generated profile's read-allow list alongside the existing
+  `/var/select/developer_dir` entries. `/var/select/sh` is the BSD
+  `select` symlink for `/bin/sh` (typically `-> /bin/bash`); macOS
+  reads it on the shell-spawn path. Git shells out via sh for hooks,
+  pager, aliases, and worktree rebuilds, so a denied read produced
+  `Error opening /private/var/select/sh: Operation not permitted` and
+  aborted commands like `git reset --hard` and `git checkout` from
+  inside the sandbox even when the rest of the tree was writable. The
+  added grants only expose the symlink target (which already resolves
+  to `/bin/bash`, a path covered by the `/usr/bin` and `/bin` system
+  read-only allows) — no new file content becomes reachable.
+- `/var/db/timezone` (and the `/private/var/...` twin) are now granted
+  as `subpath` reads so libc `localtime()` can resolve `/etc/localtime`
+  end-to-end. The symlink is `/etc/localtime -> /var/db/timezone/zoneinfo/...`;
+  the `/etc` subpath grant covered reading the symlink but not its
+  target, so timezone resolution silently fell back to UTC inside the
+  sandbox. The symptom was wrong-zone timestamps in `git log`, npm
+  output, Node `Date()`, Python `datetime.now()`, and any other tool
+  that prints local time. The grant exposes only root-owned,
+  world-readable system zoneinfo data — no user data.
+
 ## [0.3.0] - 2026-04-28
 
 ### Added

@@ -139,7 +139,7 @@ func (r *Runner) Run(ctx context.Context) RunResult {
 	env := xexec.BuildSpawnEnv(parentEnv, port, allOwned, keepKeys)
 	wrapBin, wrapArgs := backend.Wrap(sess.ProfilePath(), r.Bin, r.Args)
 
-	stopMonitor := r.startLogMonitorIfVerbose(ctx, rt.Verbose)
+	stopMonitor := r.startLogMonitorIfVerbose(ctx, rt.Verbose, writable)
 	defer stopMonitor()
 
 	classifier := NewStderrClassifier(r.stderr())

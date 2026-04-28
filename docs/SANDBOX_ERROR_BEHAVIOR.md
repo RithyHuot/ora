@@ -49,6 +49,15 @@ If the operation is legitimate, add the path or domain to the allowlist.
 See: ora policy show  and  docs/SANDBOX_ERROR_BEHAVIOR.md
 ```
 
+The exit-time banner only fires on **non-zero exit**. Some denials are non-fatal — for example, `git diff` prints `warning: unable to access '/Users/<you>/.config/git/ignore': Operation not permitted` and continues with a successful exit. To make these visible, the classifier appends a one-time `[SANDBOX]` annotation directly after the **first** stderr line that matches a sandbox signature, regardless of the eventual exit code:
+
+```
+warning: unable to access '/x/.config/git/ignore': Operation not permitted
+[SANDBOX] the "Operation not permitted" / "Permission denied" / "Read-only file system" message above is a sandbox denial — see `ora doctor` for opt-ins, or run with --verbose to see which path/host was blocked
+```
+
+Both the inline `[SANDBOX]` note and the exit-time `[SANDBOX DENIED]` banner share the `[SANDBOX` prefix so an orchestrator (or `grep`) can find every sandbox-emitted line in a single pass.
+
 | Denied operation | What stderr says | `ora` label |
 |---|---|---|
 | `file-write-create` to denied path | `Operation not permitted` | `[SANDBOX DENIED] filesystem policy boundary` |
@@ -137,6 +146,7 @@ Add the path or domain to your allowlist:
 - **Unix domain sockets:** `ORA_ALLOW_UNIX_SOCKETS=/tmp/mcp-server.sock` or `paths.allow_unix_sockets` in `.ora.toml`
 - **Read `~/.npmrc`:** `ORA_ALLOW_NPMRC=true` (contains publish auth tokens; use with caution)
 - **Read/write `.git/config`:** `paths.allow_git_config = true` (RCE primitive; only in trusted repos)
+- **Read/write workspace `.env` files** (`error: unable to create file ...env: File exists` during `git checkout` / `git reset --hard`): `paths.allow_workspace_dotenv = true` or `ORA_ALLOW_WORKSPACE_DOTENV=1` (workspace-scoped; does **not** relax `.envrc`)
 
 ### If the operation is a security risk
 

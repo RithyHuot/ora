@@ -97,6 +97,7 @@ func defaultDenies() []DenyEntry {
 		{".config/huggingface", DenyKindSubpath, DenyScopeHome, "Hugging Face API tokens"},
 		// ─── Home literal files ────────────────────────────────────────
 		{".git-credentials", DenyKindLiteral, DenyScopeHome, "git credential helper store"},
+		{".config/git/credentials", DenyKindLiteral, DenyScopeHome, "git credential helper store (XDG path)"},
 		{".bashrc", DenyKindLiteral, DenyScopeHome, "shell rc — RCE on next interactive shell"},
 		{".zshrc", DenyKindLiteral, DenyScopeHome, "shell rc — RCE on next interactive shell"},
 		{".profile", DenyKindLiteral, DenyScopeHome, "shell rc — RCE on next login"},

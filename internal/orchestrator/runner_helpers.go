@@ -65,8 +65,11 @@ func validateAllowUnixSockets(paths []string) error {
 
 // startLogMonitorIfVerbose probes the unified-log format and starts the
 // monitor if the probe passes; emits warnings to stderr otherwise. Returns
-// a no-op stop function if monitoring is unavailable.
-func (r *Runner) startLogMonitorIfVerbose(ctx context.Context, verbose bool) func() {
+// a no-op stop function if monitoring is unavailable. workspaces is the
+// resolved list of writable workspace paths used to scope hint resolution
+// (e.g. so a workspace .env denial maps to allow_workspace_dotenv but a
+// .env elsewhere does not).
+func (r *Runner) startLogMonitorIfVerbose(ctx context.Context, verbose bool, workspaces []string) func() {
 	if !verbose {
 		return func() {}
 	}
@@ -85,11 +88,24 @@ func (r *Runner) startLogMonitorIfVerbose(ctx context.Context, verbose bool) fun
 		// or exploit OSC clipboard injection on vulnerable emulators).
 		_, _ = fmt.Fprintf(r.stderr(), "[ora-sandbox] deny: %s %s\n",
 			sanitizeForTerminal(ev.Operation), sanitizeForTerminal(ev.Path))
-		r.Emitter.Push(ctx, denials.Event{
+		dev := denials.Event{
 			Kind:      denials.KindFs,
 			Operation: ev.Operation,
 			Path:      ev.Path,
-		})
+		}
+		dev.Hint = denials.HintFor(dev, workspaces)
+		// HintFor's KindFs branch (hintForPath) returns purely literal
+		// strings — no path substitution, so safe to print as-is. This
+		// invariant holds ONLY for KindFs; KindNetwork hints
+		// (hintForNetwork) interpolate the attacker-controlled host and
+		// would need sanitizeForTerminal before any stderr emit. No such
+		// path exists today (network hints flow only through the JSON
+		// emitter, which encodes control chars), but if you add one,
+		// sanitize first.
+		if dev.Hint != "" {
+			_, _ = fmt.Fprintf(r.stderr(), "[ora-sandbox] hint: %s\n", dev.Hint)
+		}
+		r.Emitter.Push(ctx, dev)
 	})
 	if lerr != nil {
 		_, _ = fmt.Fprintf(r.stderr(), "ora: log monitor unavailable: %v\n", lerr)
@@ -169,6 +185,7 @@ func (r *Runner) buildAndWriteProfile(sess *session.Session, home string, writab
 		Policy: sandbox.ProfilePolicy{
 			AllowNpmrc:              r.Config.AllowNpmrc,
 			AllowWorkspaceGitConfig: r.Config.AllowWorkspaceGitConfig,
+			AllowWorkspaceDotenv:    r.Config.AllowWorkspaceDotenv,
 			AllowSysVShm:            r.Config.AllowSysVShm,
 			StrictSysctl:            r.Config.StrictSysctl,
 			StrictMachLookup:        r.Config.StrictMachLookup,

@@ -28,6 +28,9 @@ changes require a major-version bump.
     `AllowSysVShm`, `StrictSysctl`
   - `StrictMachLookup bool` — opt-in enumerated XPC allowlist that
     replaces the blanket `(allow mach-lookup)` (added in unreleased)
+  - `AllowWorkspaceDotenv bool` — opt-in workspace-scoped re-allow of
+    `.env` files, overriding the global `*.env` regex deny inside the
+    writable workspace tree (added in unreleased)
 - `ParseSandboxLogLine`, `SandboxDenyEvent`
 - `ErrLogMonitorUnsupported`
 - `StartLogMonitor`, `SelfTestLogStream` (macOS-only at runtime; will move
@@ -67,14 +70,26 @@ changes require a major-version bump.
 - `Kind` constants: `KindNetwork`, `KindFs`, `KindStderrSignature`
 - `Kind.String`, `Kind.MarshalJSON`, `Kind.UnmarshalJSON`
 - `Discard` sink
+- `Event.Hint string` — remediation suggestion populated by producers
+  via `HintFor`; empty when no opt-in maps to this denial. Surfaced
+  in human stderr output and JSON-Lines events under the `hint` key
+  (omitted when empty so existing consumers are unaffected). Added
+  in unreleased.
+- `HintFor(e Event, workspaces []string) string` — pure resolver
+  mapping a denial to a TOML/env-var remediation hint. Workspace
+  context is required to scope path-based hints (e.g. workspace
+  `.env` → `allow_workspace_dotenv`). Added in unreleased.
 
 `Event` JSON shape (pinned via struct tags):
 
 ```json
-{"kind":"network","host":"…","port":443,"reason":"not_allowlisted"}
-{"kind":"fs","operation":"file-write-create","path":"/…"}
+{"kind":"network","host":"…","port":443,"reason":"not_allowlisted","hint":"add `…` to ORA_ALLOWED_DOMAINS …"}
+{"kind":"fs","operation":"file-write-create","path":"/…","hint":"set `paths.allow_git_config = true` …"}
 {"kind":"stderr","snippet":"…"}
 ```
+
+The `hint` key is omitted when no remediation exists (e.g. `.envrc`
+denials, `tunnel_cap` reasons, all `KindStderrSignature` events).
 
 Unset fields are omitted via `omitempty`.
 

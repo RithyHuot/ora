@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/rithyhuot/ora/pkg/providers"
@@ -24,8 +25,19 @@ type ProfilePolicy struct {
 	DenyHomeGitconfig       bool
 	AllowNpmrc              bool // default false; opt-in via ORA_ALLOW_NPMRC
 	AllowWorkspaceGitConfig bool // default false; opt-in. When false, $WS/.git/config is denied for read+write.
-	AllowSysVShm            bool // default false; opt-in. Allow ipc-sysv-shm (needed by Postgres initdb, etc.)
-	StrictSysctl            bool // default false; when true, block kern.proc.* enumeration
+	// AllowWorkspaceDotenv re-allows read+write on `.env` files inside
+	// each writable workspace path, overriding the global *.env regex
+	// deny. Default false. Opt-in for repos that commit .env files
+	// (uncommon, but breaks `git checkout` / `git reset --hard` when
+	// they exist). The deny was added to prevent the wrapped CLI from
+	// reading or writing dotenv secrets generally; this flag narrows
+	// the relaxation to the workspace and keeps .env files outside it
+	// (anywhere else on disk) denied. Does NOT relax `.envrc` —
+	// direnv's format is a shell script sourced on the user's next cd,
+	// a different RCE risk class that needs a separate flag.
+	AllowWorkspaceDotenv bool
+	AllowSysVShm         bool // default false; opt-in. Allow ipc-sysv-shm (needed by Postgres initdb, etc.)
+	StrictSysctl         bool // default false; when true, block kern.proc.* enumeration
 	// StrictMachLookup, when true, replaces the blanket (allow mach-lookup)
 	// with an enumerated allowlist of XPC/Mach service names — closing the
 	// known gap where the wrapped agent could reach com.apple.securityd
@@ -332,13 +344,30 @@ func emitPathAllows(b *strings.Builder, o ProfileOptions) error {
 	line("; /var/... and /private/var/... forms are emitted because seatbelt")
 	line("; matches on the path supplied to the syscall, not the firmlink-")
 	line("; resolved canonical, and the libxcselect walk uses both spellings.")
+	line(";")
+	line("; /var/select/sh is the same BSD-select mechanism applied to /bin/sh.")
+	line("; Git shells out via sh for hooks, pager, aliases, and worktree")
+	line("; rebuilds (`git reset --hard`, `git checkout`); without read access")
+	line("; the spawn fails with 'Error opening /private/var/select/sh:")
+	line("; Operation not permitted' and the operation aborts.")
 	for _, p := range []string{
-		"/var", "/var/select", "/var/select/developer_dir",
+		"/var", "/var/select", "/var/select/developer_dir", "/var/select/sh",
 		"/var/db", "/var/db/xcode_select_link",
-		"/private/var/select", "/private/var/select/developer_dir",
+		"/private/var/select", "/private/var/select/developer_dir", "/private/var/select/sh",
 		"/private/var/db", "/private/var/db/xcode_select_link",
 	} {
 		line(fmt.Sprintf(`(allow file-read* (literal %s))`, lit(p)))
+	}
+	line("")
+	line("; Timezone data. /etc/localtime is a symlink into /var/db/timezone")
+	line("; (e.g. -> /var/db/timezone/zoneinfo/America/New_York). The /etc")
+	line("; subpath grant covers reading the symlink itself, but resolving")
+	line("; it lands on a denied target — so libc localtime() silently")
+	line("; falls back to UTC inside the sandbox, producing wrong timestamps")
+	line("; in git log, npm output, Node Date(), Python datetime.now(), etc.")
+	line("; The data is root-owned and world-readable system zoneinfo.")
+	for _, p := range []string{"/var/db/timezone", "/private/var/db/timezone"} {
+		line(fmt.Sprintf(`(allow file-read* (subpath %s))`, lit(p)))
 	}
 	if o.XcodeReadSubpath != "" {
 		line("")
@@ -433,7 +462,16 @@ func emitPathAllows(b *strings.Builder, o ProfileOptions) error {
 		line(fmt.Sprintf(`(allow file-read* (literal %s))`, lit(o.HomeDir)))
 	}
 	if !o.Policy.DenyHomeGitconfig {
+		// ~/.gitconfig is the legacy/default location; ~/.config/git is the
+		// XDG fallback git uses when ~/.gitconfig is absent and is the
+		// canonical home for core.excludesfile (~/.config/git/ignore) and
+		// attributes. Both are read-only inside the sandbox so the agent
+		// inherits the user's identity, signing prefs, and ignore patterns
+		// without being able to mutate them. ~/.config/git/credentials is
+		// denied below alongside ~/.git-credentials — read-only access to a
+		// credential store still leaks the token.
 		line(fmt.Sprintf(`(allow file-read* (literal %s))`, lit(filepath.Join(o.HomeDir, ".gitconfig"))))
+		line(fmt.Sprintf(`(allow file-read* (subpath %s))`, lit(filepath.Join(o.HomeDir, ".config/git"))))
 	}
 	return nil
 }
@@ -522,6 +560,30 @@ func emitDenyOverrides(b *strings.Builder, o ProfileOptions) {
 	line("; ============================================================")
 	for _, p := range []string{"/etc/ssl/cert.pem", "/private/etc/ssl/cert.pem"} {
 		line(fmt.Sprintf(`(allow file-read* (literal %s))`, lit(p)))
+	}
+
+	if o.Policy.AllowWorkspaceDotenv {
+		line("")
+		line("; ============================================================")
+		line("; WORKSPACE DOTENV RE-ALLOW — overrides the *.env regex deny.")
+		line("; The global *.env deny prevents the wrapped CLI from reading")
+		line("; or writing dotenv secrets anywhere on disk. This re-allow")
+		line("; narrows the relaxation to files inside writable workspace")
+		line("; paths so `git checkout` and `git reset --hard` can")
+		line("; materialize committed .env files. Anchored to the workspace")
+		line("; prefix; .env files outside the workspace remain denied.")
+		line("; .envrc is NOT re-allowed here — direnv's format is sourced")
+		line("; on the user's next cd into the dir, a separate RCE risk.")
+		line("; Re-allow is emitted LAST so last-match-wins makes it stick.")
+		line("; ============================================================")
+		for _, wp := range o.WritablePaths {
+			// Clean before substituting — extra_writable entries from project
+			// .ora.toml are not normalized by buildWritablePaths, so a
+			// trailing slash would produce `^/path//.*\.env$` and silently
+			// fail to match real `/path/foo.env` requests.
+			pattern := "^" + regexp.QuoteMeta(filepath.Clean(wp)) + `/.*\.env$`
+			line(fmt.Sprintf(`(allow file-read* file-write* (regex #"%s"))`, pattern))
+		}
 	}
 }
 
