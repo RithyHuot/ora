@@ -162,6 +162,61 @@ func TestGenerateProfile_GitconfigAllowedReadOnly(t *testing.T) {
 	}
 }
 
+// TestGenerateProfile_XdgGitconfigAllowedReadOnly verifies that
+// ~/.config/git is granted as a read-only subpath when the gitconfig
+// allow is in effect (default). XDG is the modern path git falls back
+// to when ~/.gitconfig is absent, and is the canonical home for
+// `core.excludesfile` (~/.config/git/ignore) and `attributes`.
+func TestGenerateProfile_XdgGitconfigAllowedReadOnly(t *testing.T) {
+	got, err := GenerateProfile(baseOpts())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, `(allow file-read* (subpath "/Users/alice/.config/git"))`) {
+		t.Errorf("expected ~/.config/git subpath read allow when DenyHomeGitconfig=false (zero value)")
+	}
+}
+
+// TestGenerateProfile_DeniesXdgGitCredentials verifies that even with
+// the ~/.config/git subpath read allow above, the credentials helper
+// store at ~/.config/git/credentials is denied — matching the existing
+// ~/.git-credentials literal deny. The deny must be emitted AFTER the
+// subpath allow so it wins under Seatbelt's last-match-wins semantics.
+func TestGenerateProfile_DeniesXdgGitCredentials(t *testing.T) {
+	got, err := GenerateProfile(baseOpts())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `(deny file-read* file-write* (literal "/Users/alice/.config/git/credentials"))`
+	if !strings.Contains(got, want) {
+		t.Errorf("expected credentials deny %q — git credential helper output must not be readable", want)
+	}
+	allowIdx := strings.Index(got, `(allow file-read* (subpath "/Users/alice/.config/git"))`)
+	denyIdx := strings.Index(got, want)
+	if allowIdx < 0 || denyIdx < 0 || denyIdx < allowIdx {
+		t.Errorf("credentials deny must appear after the ~/.config/git subpath allow (allow=%d, deny=%d)", allowIdx, denyIdx)
+	}
+}
+
+// TestGenerateProfile_DenyHomeGitconfigOmitsXdgPath verifies that the
+// existing DenyHomeGitconfig switch covers both ~/.gitconfig (legacy)
+// and ~/.config/git (XDG). Stricter sandboxes should not silently leak
+// global git settings via the XDG path when the legacy one is denied.
+func TestGenerateProfile_DenyHomeGitconfigOmitsXdgPath(t *testing.T) {
+	o := baseOpts()
+	o.Policy.DenyHomeGitconfig = true
+	got, err := GenerateProfile(o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(got, `(allow file-read* (literal "/Users/alice/.gitconfig"))`) {
+		t.Errorf("expected ~/.gitconfig allow to be omitted when DenyHomeGitconfig=true")
+	}
+	if strings.Contains(got, `(allow file-read* (subpath "/Users/alice/.config/git"))`) {
+		t.Errorf("expected ~/.config/git allow to be omitted when DenyHomeGitconfig=true")
+	}
+}
+
 func TestGenerateProfile_EmitsKeychainsRead(t *testing.T) {
 	// macOS Keychain access (used by claude OAuth) needs read on the
 	// keychain DB files; the actual decrypt happens via securityd XPC,
@@ -827,14 +882,22 @@ func TestGenerateProfile_AuthDirEntryFileUsesLiteral(t *testing.T) {
 // Line Tools install dialog. Both /var/... and /private/var/... forms
 // are required because seatbelt matches on the syscall-supplied path
 // rather than the firmlink-resolved canonical.
+//
+// /var/select/sh is the same BSD-select mechanism applied to the system
+// shell. Git shells out via sh for hooks, pager, aliases, and (notably)
+// `git reset --hard` worktree rebuilds; without read access the spawn
+// path produces "Error opening /private/var/select/sh: Operation not
+// permitted" and the operation aborts.
 var xcodeSelectLinkLiterals = []string{
 	`(allow file-read* (literal "/var"))`,
 	`(allow file-read* (literal "/var/select"))`,
 	`(allow file-read* (literal "/var/select/developer_dir"))`,
+	`(allow file-read* (literal "/var/select/sh"))`,
 	`(allow file-read* (literal "/var/db"))`,
 	`(allow file-read* (literal "/var/db/xcode_select_link"))`,
 	`(allow file-read* (literal "/private/var/select"))`,
 	`(allow file-read* (literal "/private/var/select/developer_dir"))`,
+	`(allow file-read* (literal "/private/var/select/sh"))`,
 	`(allow file-read* (literal "/private/var/db"))`,
 	`(allow file-read* (literal "/private/var/db/xcode_select_link"))`,
 }
@@ -847,6 +910,28 @@ func TestGenerateProfile_EmitsXcodeSelectLinkLiterals(t *testing.T) {
 	for _, want := range xcodeSelectLinkLiterals {
 		if !strings.Contains(got, want) {
 			t.Errorf("profile missing xcode-select link allow %q — /usr/bin/git will trigger the CLT install dialog under sandbox", want)
+		}
+	}
+}
+
+// TestGenerateProfile_EmitsTimezoneSubpath verifies that the profile
+// grants read access to /var/db/timezone (and the /private/var/...
+// twin). On macOS /etc/localtime is a symlink into /var/db/timezone,
+// so without these grants any libc localtime() call resolves the
+// symlink, lands on a denied path, and silently falls back to UTC —
+// breaking timestamps in `git log`, Node `Date()`, Python
+// `datetime.now()`, and similar.
+func TestGenerateProfile_EmitsTimezoneSubpath(t *testing.T) {
+	got, err := GenerateProfile(baseOpts())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`(allow file-read* (subpath "/var/db/timezone"))`,
+		`(allow file-read* (subpath "/private/var/db/timezone"))`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("profile missing timezone allow %q — localtime() will fall back to UTC inside the sandbox", want)
 		}
 	}
 }

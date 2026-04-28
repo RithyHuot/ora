@@ -84,6 +84,7 @@ Denied as subpaths inside the user's home directory:
 Denied as literal files inside the user's home directory:
 
 - `.git-credentials`
+- `.config/git/credentials` (XDG-path twin of `.git-credentials` — git's credential helper writes here when `XDG_CONFIG_HOME` is set)
 - `.bashrc`
 - `.zshrc`
 - `.profile`

@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The XDG global git config path `~/.config/git/` is now a read-only
+  subpath inside the sandbox, alongside the existing `~/.gitconfig`
+  literal-read allow. Both are gated by the same
+  `Policy.DenyHomeGitconfig` switch (default: allow). Symptom this
+  fixes: `~/.config/git/ignore` was inaccessible, so global gitignore
+  patterns silently didn't apply inside the sandbox, and operations
+  like `git reset --hard` printed `warning: unable to access
+  '/Users/<you>/.config/git/ignore': Operation not permitted`.
+  `~/.config/git/credentials` is now in the mandatory home literal
+  deny list alongside `~/.git-credentials` — read-only access to a
+  credential helper store still leaks the token, so the deny is
+  emitted after the subpath allow and overrides it under Seatbelt's
+  last-match-wins semantics.
+
+### Fixed
+
+- `/var/select/sh` and `/private/var/select/sh` are now in the
+  generated profile's read-allow list alongside the existing
+  `/var/select/developer_dir` entries. `/var/select/sh` is the BSD
+  `select` symlink for `/bin/sh` (typically `-> /bin/bash`); macOS
+  reads it on the shell-spawn path. Git shells out via sh for hooks,
+  pager, aliases, and worktree rebuilds, so a denied read produced
+  `Error opening /private/var/select/sh: Operation not permitted` and
+  aborted commands like `git reset --hard` and `git checkout` from
+  inside the sandbox even when the rest of the tree was writable. The
+  added grants only expose the symlink target (which already resolves
+  to `/bin/bash`, a path covered by the `/usr/bin` and `/bin` system
+  read-only allows) — no new file content becomes reachable.
+- `/var/db/timezone` (and the `/private/var/...` twin) are now granted
+  as `subpath` reads so libc `localtime()` can resolve `/etc/localtime`
+  end-to-end. The symlink is `/etc/localtime -> /var/db/timezone/zoneinfo/...`;
+  the `/etc` subpath grant covered reading the symlink but not its
+  target, so timezone resolution silently fell back to UTC inside the
+  sandbox. The symptom was wrong-zone timestamps in `git log`, npm
+  output, Node `Date()`, Python `datetime.now()`, and any other tool
+  that prints local time. The grant exposes only root-owned,
+  world-readable system zoneinfo data — no user data.
+
 ## [0.3.0] - 2026-04-28
 
 ### Added

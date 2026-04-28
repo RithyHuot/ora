@@ -332,13 +332,30 @@ func emitPathAllows(b *strings.Builder, o ProfileOptions) error {
 	line("; /var/... and /private/var/... forms are emitted because seatbelt")
 	line("; matches on the path supplied to the syscall, not the firmlink-")
 	line("; resolved canonical, and the libxcselect walk uses both spellings.")
+	line(";")
+	line("; /var/select/sh is the same BSD-select mechanism applied to /bin/sh.")
+	line("; Git shells out via sh for hooks, pager, aliases, and worktree")
+	line("; rebuilds (`git reset --hard`, `git checkout`); without read access")
+	line("; the spawn fails with 'Error opening /private/var/select/sh:")
+	line("; Operation not permitted' and the operation aborts.")
 	for _, p := range []string{
-		"/var", "/var/select", "/var/select/developer_dir",
+		"/var", "/var/select", "/var/select/developer_dir", "/var/select/sh",
 		"/var/db", "/var/db/xcode_select_link",
-		"/private/var/select", "/private/var/select/developer_dir",
+		"/private/var/select", "/private/var/select/developer_dir", "/private/var/select/sh",
 		"/private/var/db", "/private/var/db/xcode_select_link",
 	} {
 		line(fmt.Sprintf(`(allow file-read* (literal %s))`, lit(p)))
+	}
+	line("")
+	line("; Timezone data. /etc/localtime is a symlink into /var/db/timezone")
+	line("; (e.g. -> /var/db/timezone/zoneinfo/America/New_York). The /etc")
+	line("; subpath grant covers reading the symlink itself, but resolving")
+	line("; it lands on a denied target — so libc localtime() silently")
+	line("; falls back to UTC inside the sandbox, producing wrong timestamps")
+	line("; in git log, npm output, Node Date(), Python datetime.now(), etc.")
+	line("; The data is root-owned and world-readable system zoneinfo.")
+	for _, p := range []string{"/var/db/timezone", "/private/var/db/timezone"} {
+		line(fmt.Sprintf(`(allow file-read* (subpath %s))`, lit(p)))
 	}
 	if o.XcodeReadSubpath != "" {
 		line("")
@@ -433,7 +450,16 @@ func emitPathAllows(b *strings.Builder, o ProfileOptions) error {
 		line(fmt.Sprintf(`(allow file-read* (literal %s))`, lit(o.HomeDir)))
 	}
 	if !o.Policy.DenyHomeGitconfig {
+		// ~/.gitconfig is the legacy/default location; ~/.config/git is the
+		// XDG fallback git uses when ~/.gitconfig is absent and is the
+		// canonical home for core.excludesfile (~/.config/git/ignore) and
+		// attributes. Both are read-only inside the sandbox so the agent
+		// inherits the user's identity, signing prefs, and ignore patterns
+		// without being able to mutate them. ~/.config/git/credentials is
+		// denied below alongside ~/.git-credentials — read-only access to a
+		// credential store still leaks the token.
 		line(fmt.Sprintf(`(allow file-read* (literal %s))`, lit(filepath.Join(o.HomeDir, ".gitconfig"))))
+		line(fmt.Sprintf(`(allow file-read* (subpath %s))`, lit(filepath.Join(o.HomeDir, ".config/git"))))
 	}
 	return nil
 }
