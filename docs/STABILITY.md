@@ -29,7 +29,8 @@ changes require a major-version bump.
 - `StartLogMonitor`, `SelfTestLogStream` (macOS-only at runtime; will move
   onto `Backend` if a non-macOS backend lands)
 - `DetectGitCommonDir`, `DetectNodeBinDir`, `DetectHomebrewRoots`,
-  `DetectVersionMgrDirs`, `ExistingPaths`
+  `DetectVersionMgrDirs`, `DetectActiveDeveloperDir`,
+  `DetectXcodeReadSubpath`, `ExistingPaths`
 
 ### `pkg/proxy`
 

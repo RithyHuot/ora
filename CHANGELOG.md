@@ -7,8 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `pkg/sandbox.DetectActiveDeveloperDir(logger)` — reads
+  `/var/select/developer_dir` (and the legacy `/var/db/xcode_select_link`)
+  to return the active xcode-select developer directory, or `""` when no
+  link is readable or its target is missing.
+- `pkg/sandbox.DetectXcodeReadSubpath(logger)` — returns the read-only
+  subpath the sandbox should grant so libxcselect's `/usr/bin/git` shim
+  can resolve and exec the active dev dir, applying these gates in order:
+  no link → `""`, dev dir under CommandLineTools → `""`, CLT installed
+  alongside Xcode → `""` (xcselect falls back to CLT cleanly), Xcode-only
+  → the `.app` bundle root.
+- `pkg/sandbox.ProfileOptions.XcodeReadSubpath string` — optional extra
+  read-only subpath to grant for the xcode-select install. Out-of-tree
+  embedders constructing `ProfileOptions` directly should populate via
+  `sandbox.DetectXcodeReadSubpath`.
+
 ### Fixed
 
+- macOS Command Line Tools install dialog appeared every `ora` run
+  (even after the user installed CLT in response to a prior dialog).
+  `/usr/bin/git` is a libxcselect shim that resolves the active developer
+  dir from `/var/select/developer_dir` (and the legacy
+  `/var/db/xcode_select_link`) before exec'ing the real git. The profile
+  did not allow read on either, so libxcselect concluded "no developer
+  tools" and triggered the install dialog; the underlying access denial
+  never changed, so the dialog kept reappearing. The profile now emits
+  literal read allows for both link forms (in both `/var/...` and
+  `/private/var/...` spellings, because seatbelt matches on the
+  syscall-supplied path rather than the firmlink-resolved canonical).
+  For Xcode-only installs (no CLT), the profile additionally grants a
+  read-only subpath for the `.app` bundle root so DVT* frameworks at
+  sibling `<bundle>/Contents/{Frameworks,SharedFrameworks}` resolve.
+  Skipped when CLT is also installed: libxcselect falls back to CLT
+  cleanly, and exposing only `<bundle>/Contents/Developer` would
+  actively break the fallback by making xcselect prefer the Xcode dev
+  dir and then fail loading sibling frameworks.
 - `ora --version` reported `dev` for binaries installed via
   `go install github.com/rithyhuot/ora/cmd/ora@vX.Y.Z` (the README's
   recommended path). `go install` does not honor the Makefile's
