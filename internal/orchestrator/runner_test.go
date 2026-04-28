@@ -405,6 +405,107 @@ func TestRunner_Run_RegisteredProviderFlowsEnvStrip(t *testing.T) {
 	}
 }
 
+// TestRunner_Run_AppliesProviderEnvDefaults exercises the EnvDefaults flow
+// end-to-end through Runner.Run. Three properties must hold:
+//   - benign defaults reach the spawn env when the user has not set them
+//   - user-set values inherited from parent env override provider defaults
+//   - hostile defaults that name a key in alwaysStripKeys (NODE_OPTIONS,
+//     DYLD_INSERT_LIBRARIES, etc.) MUST NOT survive — that's the security
+//     boundary the BuildSpawnEnv/ApplyEnvDefaults ordering enforces, and a
+//     refactor that drops the order guarantee should be caught here.
+func TestRunner_Run_AppliesProviderEnvDefaults(t *testing.T) {
+	t.Cleanup(func() { providers.Unregister("envdefaults-cli") })
+	if err := providers.Register(providers.ProviderSpec{
+		Name:     "envdefaults-cli",
+		BinNames: []string{"envdefaults-cli"},
+		AuthDirsRW: func(home string, _ map[string]string) []providers.AuthDirEntry {
+			return []providers.AuthDirEntry{{Path: filepath.Join(home, ".edcli"), Kind: providers.AuthDirKindDir}}
+		},
+		OwnEnvKeys: []string{"EDCLI_API_KEY"},
+		ProbeHost:  "api.envdefaults.example",
+		EnvDefaults: map[string]string{
+			"DISABLE_TELEMETRY": "1",                      // benign — should land in env
+			"USER_OVERRIDABLE":  "default",                // user has set this; default should be skipped
+			"NODE_OPTIONS":      "--require=/tmp/evil.js", // hostile — must be stripped by BuildSpawnEnv
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USER_OVERRIDABLE", "user-wins")
+	// Sanity: user did NOT set NODE_OPTIONS in their environment, so the
+	// only path it could reach the spawn env is via EnvDefaults — which we
+	// expect to be stripped. Errors here are ignored: failing to unset is
+	// only possible on a kernel that doesn't support env mutation, which
+	// can't host this test in the first place.
+	_ = os.Unsetenv("NODE_OPTIONS")
+	_ = os.Unsetenv("DISABLE_TELEMETRY")
+
+	cwd := filepath.Join(tmp, "project")
+	if err := os.MkdirAll(cwd, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	origWd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(cwd); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(origWd); err != nil {
+			t.Errorf("restore cwd: %v", err)
+		}
+	})
+
+	var capturedEnv []string
+	runner := &Runner{
+		Config: config.Config{
+			NativeKernel: true,
+			AuthDirMode:  "readwrite",
+		},
+		ProviderName: "envdefaults-cli",
+		Bin:          "/bin/echo",
+		Args:         []string{"ok"},
+		AuthDirs: func() providers.AuthResolver {
+			spec, _ := providers.Lookup("envdefaults-cli")
+			return spec.AuthDirsRW
+		}(),
+		Emitter: events.NewEmitter(nil),
+		Logger:  slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelWarn})),
+		ExecFunc: func(_ context.Context, _ string, _ []string, env []string, _ string) error {
+			capturedEnv = env
+			return nil
+		},
+	}
+
+	res := runner.Run(context.Background())
+	if res.Err != nil {
+		t.Fatalf("unexpected error: %v", res.Err)
+	}
+	if len(capturedEnv) == 0 {
+		t.Fatal("ExecFunc was not invoked")
+	}
+	joined := strings.Join(capturedEnv, "|")
+
+	if !strings.Contains(joined, "DISABLE_TELEMETRY=1") {
+		t.Error("benign provider EnvDefault did not land in spawn env")
+	}
+	if !strings.Contains(joined, "USER_OVERRIDABLE=user-wins") {
+		t.Error("user-set parent-env value was overridden by provider default")
+	}
+	if strings.Contains(joined, "USER_OVERRIDABLE=default") {
+		t.Error("provider default clobbered user-set value")
+	}
+	if strings.Contains(joined, "NODE_OPTIONS=") {
+		t.Error("SECURITY: hostile EnvDefaults[\"NODE_OPTIONS\"] was not stripped — " +
+			"BuildSpawnEnv must run after ApplyEnvDefaults so loader-hook keys " +
+			"in alwaysStripKeys cannot bypass the strip pass")
+	}
+}
+
 func TestClassifySandboxFailure(t *testing.T) {
 	cases := []struct {
 		fsDeny bool

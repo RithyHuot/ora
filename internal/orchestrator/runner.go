@@ -125,8 +125,18 @@ func (r *Runner) Run(ctx context.Context) RunResult {
 		keepKeys = spec.OwnEnvKeys
 		envDefaults = spec.EnvDefaults
 	}
-	env := xexec.BuildSpawnEnv(os.Environ(), port, allOwned, keepKeys)
-	env = xexec.ApplyEnvDefaults(env, envDefaults)
+	// Apply provider EnvDefaults to the PARENT env first, then run
+	// BuildSpawnEnv on the merged result. This matters for security:
+	// applying defaults AFTER BuildSpawnEnv would let a (hostile or
+	// misconfigured) provider re-introduce keys that alwaysStripKeys
+	// deliberately removed — NODE_OPTIONS, DYLD_INSERT_LIBRARIES,
+	// BASH_ENV, PYTHONSTARTUP, etc. Merging first means those keys go
+	// through the same strip pass as inherited parent env, so an
+	// EnvDefaults["NODE_OPTIONS"] = "..." cannot bypass loader-hook
+	// stripping. ApplyEnvDefaults preserves the "user value wins"
+	// semantic by skipping keys already present in the input.
+	parentEnv := xexec.ApplyEnvDefaults(os.Environ(), envDefaults)
+	env := xexec.BuildSpawnEnv(parentEnv, port, allOwned, keepKeys)
 	wrapBin, wrapArgs := backend.Wrap(sess.ProfilePath(), r.Bin, r.Args)
 
 	stopMonitor := r.startLogMonitorIfVerbose(ctx, rt.Verbose)

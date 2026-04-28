@@ -59,7 +59,12 @@ func TestIntegration_PTYIoctlPermittedUnderProfile(t *testing.T) {
 	//
 	// Before the PTY-ioctl fix, this exits with "openpty: Operation not
 	// permitted" and a non-zero status. After the fix, script runs the inner
-	// `/bin/echo` cleanly and writes the typescript transcript.
+	// `/bin/echo` cleanly and writes the transcript file.
+	//
+	// On macOS, script(1) writes the inner command's output to the transcript
+	// file rather than its own stdout — so the transcript contents are the
+	// load-bearing assertion. Checking the parent-process stdout would silently
+	// never match.
 	transcript := filepath.Join(tmp, "typescript")
 	cmd := exec.Command("sandbox-exec", "-f", profilePath,
 		"/usr/bin/script", "-q", transcript, "/bin/echo", "pty-ok")
@@ -70,13 +75,12 @@ func TestIntegration_PTYIoctlPermittedUnderProfile(t *testing.T) {
 		t.Fatalf("script under sandbox failed: %v\nstdout=%s\nstderr=%s",
 			err, stdout.String(), stderr.String())
 	}
-	if !bytes.Contains(stdout.Bytes(), []byte("pty-ok")) {
-		t.Errorf("expected stdout to contain 'pty-ok' (echoed via PTY); got:\nstdout=%s\nstderr=%s",
-			stdout.String(), stderr.String())
+	transcriptBytes, err := os.ReadFile(transcript)
+	if err != nil {
+		t.Fatalf("expected transcript at %s, got: %v", transcript, err)
 	}
-	// The transcript file is written by script(1) inside the writable tmp dir;
-	// its presence confirms the master side of the PTY was readable.
-	if _, err := os.Stat(transcript); err != nil {
-		t.Errorf("expected transcript at %s, got: %v", transcript, err)
+	if !bytes.Contains(transcriptBytes, []byte("pty-ok")) {
+		t.Errorf("expected transcript to contain 'pty-ok' (echoed through the PTY); got:\ntranscript=%q\nstderr=%s",
+			string(transcriptBytes), stderr.String())
 	}
 }

@@ -168,6 +168,24 @@ var (
 	}
 )
 
+// init validates every builtin's AllowedDomains at package load time.
+// Builtins are added directly to the registry map and bypass Register's
+// validation; without this fail-closed check, a typo or overly-broad
+// wildcard in a builtin entry would ship to users undetected (the
+// existing TestBuiltinProviders_AllowedDomainsCanonical guards drift
+// only when tests run, not on every binary). Panicking here matches
+// ora's fail-closed posture for sandbox / egress invariants.
+func init() {
+	for name, spec := range registry {
+		if len(spec.AllowedDomains) == 0 {
+			continue
+		}
+		if _, err := proxy.ValidateAllowedDomains(spec.AllowedDomains); err != nil {
+			panic(fmt.Sprintf("providers: builtin %q has invalid AllowedDomains: %v", name, err))
+		}
+	}
+}
+
 // Lookup returns the spec for the named provider. The bool reports whether
 // the provider is registered. Safe for concurrent use.
 func Lookup(name string) (ProviderSpec, bool) {
