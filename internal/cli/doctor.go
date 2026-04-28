@@ -123,6 +123,7 @@ func runDoctor(out io.Writer, sweep, probe bool) error {
 		if probe && spec.ProbeHost != "" {
 			host := spec.ProbeHost
 			allowed := append([]string{host}, sandbox.DefaultPolicy().AllowedDomains...)
+			allowed = append(allowed, spec.AllowedDomains...)
 			if probeErr := probeProviderThroughEgress(host, allowed); probeErr != nil {
 				dw.printf("      probe: FAIL (%v)\n", probeErr)
 			} else {

@@ -97,7 +97,11 @@ func (r *Runner) Run(ctx context.Context) RunResult {
 	defer sess.Cleanup() //nolint:errcheck // cleanup errors are logged via OnCleanup hooks
 
 	policy := sandbox.DefaultPolicy()
-	allowedDomains := append(append([]string{}, policy.AllowedDomains...), r.Config.ExtraDomains...)
+	allowedDomains := append([]string{}, policy.AllowedDomains...)
+	if spec, ok := providers.Lookup(r.ProviderName); ok && len(spec.AllowedDomains) > 0 {
+		allowedDomains = append(allowedDomains, spec.AllowedDomains...)
+	}
+	allowedDomains = append(allowedDomains, r.Config.ExtraDomains...)
 	allowedDomains = append(allowedDomains, rt.AdHocAllowedDomains...)
 	prx, port, err := r.startEgressProxy(ctx, sess, allowedDomains)
 	if err != nil {
@@ -113,11 +117,16 @@ func (r *Runner) Run(ctx context.Context) RunResult {
 	}
 
 	allOwned := providers.AllOwnedEnvKeys()
-	var keepKeys []string
+	var (
+		keepKeys    []string
+		envDefaults map[string]string
+	)
 	if spec, ok := providers.Lookup(r.ProviderName); ok {
 		keepKeys = spec.OwnEnvKeys
+		envDefaults = spec.EnvDefaults
 	}
 	env := xexec.BuildSpawnEnv(os.Environ(), port, allOwned, keepKeys)
+	env = xexec.ApplyEnvDefaults(env, envDefaults)
 	wrapBin, wrapArgs := backend.Wrap(sess.ProfilePath(), r.Bin, r.Args)
 
 	stopMonitor := r.startLogMonitorIfVerbose(ctx, rt.Verbose)
