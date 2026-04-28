@@ -142,6 +142,19 @@ func runDoctor(out io.Writer, sweep, probe bool) error {
 	dw.println("    compatibility against the strict list is being validated.")
 
 	dw.println("")
+	dw.println("common opt-ins (use one of these when you see a denial mentioning the path):")
+	dw.println("  - read ~/.npmrc")
+	dw.println("      ORA_ALLOW_NPMRC=1   |   paths.allow_npmrc = true")
+	dw.println("  - read+write workspace .git/config (RCE primitive — only in trusted repos)")
+	dw.println("      paths.allow_git_config = true")
+	dw.println("  - read+write workspace .env files (does not relax .envrc)")
+	dw.println("      ORA_ALLOW_WORKSPACE_DOTENV=1   |   paths.allow_workspace_dotenv = true")
+	dw.println("  - allow extra HTTPS hosts through the egress proxy")
+	dw.println("      ORA_ALLOWED_DOMAINS=host1,host2   |   egress.extra_domains = [...]")
+	dw.println("  Denial events emit a `hint:` line under --verbose pointing at the right")
+	dw.println("  knob; --json events carry the same string in a `hint` field.")
+
+	dw.println("")
 	stale := findStaleProfiles(24 * time.Hour)
 	dw.printf("stale profiles: %d (older than 24h)\n", len(stale))
 	if sweep {

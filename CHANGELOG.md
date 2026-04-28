@@ -9,6 +9,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Denial-hint pipeline. Every `denials.Event` now carries an optional
+  `Hint string` field (`json:"hint,omitempty"`) — a remediation
+  suggestion pointing at the TOML key or env var that would have
+  prevented the denial. Producers (proxy egress, sandbox log monitor)
+  populate it via the new `pkg/denials.HintFor(e Event, workspaces
+  []string) string` resolver. Hints surface in three places:
+  (1) the human `--verbose` stream as a `[ora-sandbox] hint: ...` line
+  immediately under the matching `[ora-sandbox] deny: ...`;
+  (2) the `--json` event stream as a `hint` key (omitted when empty so
+  existing consumers see no change);
+  (3) `ora doctor` prints a static "common opt-ins" cheat sheet
+  even when no denials have happened yet, so users can discover the
+  flags before they hit a wall. The hint table is intentionally small
+  and only covers cases with a real opt-in: workspace `.git/config` →
+  `paths.allow_git_config`, `~/.npmrc` → `ORA_ALLOW_NPMRC` /
+  `paths.allow_npmrc`, workspace `.env` → `ORA_ALLOW_WORKSPACE_DOTENV`
+  / `paths.allow_workspace_dotenv`, non-allowlisted host →
+  `ORA_ALLOWED_DOMAINS` / `egress.extra_domains`. `.envrc` denials
+  intentionally return no hint (no opt-in exists — direnv RCE on next
+  cd makes a flag the wrong answer); operational network reasons
+  (`tunnel_cap`, `non_443`) and all `KindStderrSignature` events
+  return no hint to avoid fabricating advice.
+- Inline `[ora-sandbox] note:` annotation on the wrapped CLI's stderr.
+  When the StderrClassifier sees the first sandbox-signature line
+  (`Operation not permitted`, `Permission denied`, `Read-only file
+  system`) in the child's output, it appends a one-time note pointing
+  at `ora doctor` so a bare denial line doesn't look like a generic
+  system error. Fires in the default-mode stream (without `--verbose`)
+  and even when the wrapped command ultimately exits 0 (e.g. git's
+  non-fatal gitignore warning) — covering the gap where the existing
+  exit-time `[SANDBOX DENIED]` banner only fires on non-zero exit.
 - `pkg/sandbox.ProfilePolicy.AllowWorkspaceDotenv bool` (TOML
   `allow_workspace_dotenv`, env `ORA_ALLOW_WORKSPACE_DOTENV`) — opt-in
   toggle that re-allows read+write on `.env` files inside the

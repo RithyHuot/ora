@@ -175,12 +175,16 @@ func (e *Egress) pushDeny(ctx context.Context, host string, port int, reason str
 	if e.denials == nil {
 		return
 	}
-	e.denials.Push(ctx, denials.Event{
+	ev := denials.Event{
 		Kind:   denials.KindNetwork,
 		Host:   host,
 		Port:   port,
 		Reason: reason,
-	})
+	}
+	// Network denials don't need workspace context (the hint maps host
+	// → ORA_ALLOWED_DOMAINS / extra_domains, both global). Pass nil.
+	ev.Hint = denials.HintFor(ev, nil)
+	e.denials.Push(ctx, ev)
 }
 
 // Start binds 127.0.0.1:<random-free> and begins serving. Returns the

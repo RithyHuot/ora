@@ -217,6 +217,8 @@ If `--verbose` is set, `sandbox.SelfTestLogStream` first probes `/usr/bin/log sh
 
 Three producers — `proxy.Egress` (network blocks), `sandbox.StartLogMonitor` (FS denies), and `orchestrator.StderrClassifier` (stderr signature) — all emit `denials.Event` records into a single `denials.Sink`. `events.Emitter` implements `Sink` and translates events into JSON-Lines when `--json` is set. Aggregation helpers (`Multi` fan-out, `Counter`) live in `internal/denials` for the runner's own use and are not part of the public API.
 
+Producers populate `Event.Hint` via `denials.HintFor(e, workspaces)` before pushing — a pure resolver that maps a denial to a TOML/env-var remediation suggestion (e.g. workspace `.git/config` → `paths.allow_git_config = true`). The hint surfaces in `--verbose` stderr (a `[ora-sandbox] hint: ...` line follows the matching `deny:` line) and in `--json` events under the `hint` key (omitted when empty). `KindStderrSignature` events get no hint by design — the snippet lacks structured path/host context and pattern-matching it would fabricate brittle advice. The proxy passes `nil` for workspace context (network hints are global); the log-monitor callback receives the runner's resolved writable paths so workspace-scoped hints (like `.env`) only fire for paths inside the tree.
+
 ### 13. Cleanup
 
 On exit (normal or signal), the deferred `session.Cleanup` runs:

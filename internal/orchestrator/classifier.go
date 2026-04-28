@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"strings"
 	"sync"
@@ -29,8 +30,9 @@ type StderrClassifier struct {
 	w   io.Writer
 	mu  sync.Mutex
 	buf bytes.Buffer
-	// hasDeny is guarded by mu.
-	hasDeny bool
+	// hasDeny and annotated are guarded by mu.
+	hasDeny   bool
+	annotated bool
 }
 
 // NewStderrClassifier returns a classifier that writes to w.
@@ -38,8 +40,20 @@ func NewStderrClassifier(w io.Writer) *StderrClassifier {
 	return &StderrClassifier{w: w}
 }
 
+// inlineDenialNote is the one-time annotation emitted directly after the
+// first stderr line that matches a sandbox signature. Without it, the
+// raw "Operation not permitted" / "Permission denied" output looks like
+// a generic system error — users miss that ora's sandbox is the cause
+// and try things like `sudo` or alternative paths instead of opting in
+// to the right path/host. Worded as a `note:` (not a banner) because the
+// child may still exit 0 (e.g. git emits the gitignore warning and
+// continues), so we don't want to look like a fatal error.
+const inlineDenialNote = "[ora-sandbox] note: an \"Operation not permitted\" / \"Permission denied\" / \"Read-only file system\" message above is a sandbox denial — see `ora doctor` for opt-ins, or run with --verbose to see which path/host was blocked\n"
+
 // Write implements io.Writer. All bytes are forwarded to the underlying
-// writer. The trailing 4 KB of output is scanned for sandbox signatures.
+// writer. The trailing 4 KB of output is scanned for sandbox signatures;
+// on the first match a one-time annotation is appended so a bare denial
+// line in the child's output doesn't look like a generic system error.
 func (c *StderrClassifier) Write(p []byte) (n int, err error) {
 	n, err = c.w.Write(p)
 	if n > 0 {
@@ -50,6 +64,13 @@ func (c *StderrClassifier) Write(p []byte) (n int, err error) {
 		}
 		if !c.hasDeny {
 			c.hasDeny = containsSignature(c.buf.String())
+		}
+		// Emit the inline note exactly once, immediately after the
+		// matching write. Failure to write the note is non-fatal —
+		// the exit-time [SANDBOX DENIED] banner still fires.
+		if c.hasDeny && !c.annotated {
+			c.annotated = true
+			_, _ = fmt.Fprint(c.w, inlineDenialNote)
 		}
 		c.mu.Unlock()
 	}

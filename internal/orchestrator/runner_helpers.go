@@ -65,8 +65,11 @@ func validateAllowUnixSockets(paths []string) error {
 
 // startLogMonitorIfVerbose probes the unified-log format and starts the
 // monitor if the probe passes; emits warnings to stderr otherwise. Returns
-// a no-op stop function if monitoring is unavailable.
-func (r *Runner) startLogMonitorIfVerbose(ctx context.Context, verbose bool) func() {
+// a no-op stop function if monitoring is unavailable. workspaces is the
+// resolved list of writable workspace paths used to scope hint resolution
+// (e.g. so a workspace .env denial maps to allow_workspace_dotenv but a
+// .env elsewhere does not).
+func (r *Runner) startLogMonitorIfVerbose(ctx context.Context, verbose bool, workspaces []string) func() {
 	if !verbose {
 		return func() {}
 	}
@@ -85,11 +88,19 @@ func (r *Runner) startLogMonitorIfVerbose(ctx context.Context, verbose bool) fun
 		// or exploit OSC clipboard injection on vulnerable emulators).
 		_, _ = fmt.Fprintf(r.stderr(), "[ora-sandbox] deny: %s %s\n",
 			sanitizeForTerminal(ev.Operation), sanitizeForTerminal(ev.Path))
-		r.Emitter.Push(ctx, denials.Event{
+		dev := denials.Event{
 			Kind:      denials.KindFs,
 			Operation: ev.Operation,
 			Path:      ev.Path,
-		})
+		}
+		dev.Hint = denials.HintFor(dev, workspaces)
+		// The hint string is composed of literal config keys / env var
+		// names ora itself emits — there is no attacker-controlled
+		// substitution path through HintFor. Safe to print as-is.
+		if dev.Hint != "" {
+			_, _ = fmt.Fprintf(r.stderr(), "[ora-sandbox] hint: %s\n", dev.Hint)
+		}
+		r.Emitter.Push(ctx, dev)
 	})
 	if lerr != nil {
 		_, _ = fmt.Fprintf(r.stderr(), "ora: log monitor unavailable: %v\n", lerr)

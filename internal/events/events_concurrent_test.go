@@ -34,8 +34,8 @@ func TestEmitter_ConcurrentEmissionsDoNotTear(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for range perGoroutine {
-				e.NetworkBlocked("api.example.com", 443, "not_allowlisted")
-				e.FsDeny("file-read", "/Users/x/.ssh/id_rsa")
+				e.NetworkBlocked("api.example.com", 443, "not_allowlisted", "")
+				e.FsDeny("file-read", "/Users/x/.ssh/id_rsa", "")
 			}
 		}()
 	}

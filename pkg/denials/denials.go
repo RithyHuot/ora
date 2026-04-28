@@ -82,6 +82,13 @@ type Event struct {
 	Operation string `json:"operation,omitempty"` // KindFs (e.g. "file-write-create")
 	Path      string `json:"path,omitempty"`      // KindFs
 	Snippet   string `json:"snippet,omitempty"`   // KindStderrSignature
+	// Hint is a remediation suggestion for this denial — typically a
+	// pointer at a TOML key or env var that would have prevented it
+	// (e.g. `paths.allow_git_config = true`). Producers populate it via
+	// HintFor; empty when no opt-in maps to this denial. Surfaced in
+	// human stderr output and JSON-Lines events so users discover the
+	// right knob without grepping the docs.
+	Hint string `json:"hint,omitempty"`
 }
 
 // Sink receives denial events. Implementations must be safe for concurrent

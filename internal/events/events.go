@@ -57,14 +57,25 @@ func (e *Emitter) emit(payload map[string]any) {
 	}
 }
 
-// NetworkBlocked emits a network_blocked event.
-func (e *Emitter) NetworkBlocked(host string, port int, reason string) {
-	e.emit(map[string]any{"type": "network_blocked", "host": host, "port": port, "reason": reason})
+// NetworkBlocked emits a network_blocked event. hint is a remediation
+// suggestion (typically resolved via denials.HintFor); empty hint is
+// omitted from the JSON to keep existing consumers unaffected.
+func (e *Emitter) NetworkBlocked(host string, port int, reason, hint string) {
+	payload := map[string]any{"type": "network_blocked", "host": host, "port": port, "reason": reason}
+	if hint != "" {
+		payload["hint"] = hint
+	}
+	e.emit(payload)
 }
 
-// FsDeny emits an fs_deny event.
-func (e *Emitter) FsDeny(operation, path string) {
-	e.emit(map[string]any{"type": "fs_deny", "operation": operation, "path": path})
+// FsDeny emits an fs_deny event. hint is a remediation suggestion
+// (typically resolved via denials.HintFor); empty hint is omitted.
+func (e *Emitter) FsDeny(operation, path, hint string) {
+	payload := map[string]any{"type": "fs_deny", "operation": operation, "path": path}
+	if hint != "" {
+		payload["hint"] = hint
+	}
+	e.emit(payload)
 }
 
 // SandboxSummary emits a sandbox_summary event.
@@ -85,9 +96,9 @@ func (e *Emitter) SandboxSummary(exitCode int, durationMs int64, networkBlocks i
 func (e *Emitter) Push(_ context.Context, ev denials.Event) {
 	switch ev.Kind {
 	case denials.KindNetwork:
-		e.NetworkBlocked(ev.Host, ev.Port, ev.Reason)
+		e.NetworkBlocked(ev.Host, ev.Port, ev.Reason, ev.Hint)
 	case denials.KindFs:
-		e.FsDeny(ev.Operation, ev.Path)
+		e.FsDeny(ev.Operation, ev.Path, ev.Hint)
 	case denials.KindStderrSignature:
 		// Not currently emitted as JSON; the runner already prints a
 		// SANDBOX DENIED summary on exit when this fires.
