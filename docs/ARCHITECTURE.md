@@ -281,6 +281,10 @@ Process model (`process-exec`, `process-fork`), `sysctl-read`, `mach-lookup`, `i
 
 Mandatory denies applied **after** all allows. Seatbelt evaluates rules in order; a later `deny` overrides an earlier `allow` for the same path.
 
+### Layer 3.5: Opt-in workspace re-allows
+
+When `Policy.AllowWorkspaceDotenv=true`, a workspace-anchored regex re-allow (`^<workspace>/.*\.env$`) is emitted **after** the global `*.env` mandatory regex deny. Last-match-wins makes the workspace allow win for `.env` files inside the writable tree while leaving `.env` files anywhere else on disk denied. The flag deliberately does not relax `.envrc` — that's a different risk class (direnv RCE on user's next `cd`).
+
 - **Home-relative:** `.ssh`, `.aws`, `.gnupg`, `.docker`, shell rc files, `.git-credentials`, `.npmrc`
 - **Regex:** `^.*\.env$`, `^.*\.pem$`, `^.*\.key$`, `^.*id_rsa.*$`, `^.*id_ed25519.*$`
 - **Workspace-relative:** `.git/hooks`, `.gitmodules`, `.mcp.json`, `.ripgreprc`, `.git/config` (unless opted in)

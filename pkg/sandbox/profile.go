@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/rithyhuot/ora/pkg/providers"
@@ -24,8 +25,19 @@ type ProfilePolicy struct {
 	DenyHomeGitconfig       bool
 	AllowNpmrc              bool // default false; opt-in via ORA_ALLOW_NPMRC
 	AllowWorkspaceGitConfig bool // default false; opt-in. When false, $WS/.git/config is denied for read+write.
-	AllowSysVShm            bool // default false; opt-in. Allow ipc-sysv-shm (needed by Postgres initdb, etc.)
-	StrictSysctl            bool // default false; when true, block kern.proc.* enumeration
+	// AllowWorkspaceDotenv re-allows read+write on `.env` files inside
+	// each writable workspace path, overriding the global *.env regex
+	// deny. Default false. Opt-in for repos that commit .env files
+	// (uncommon, but breaks `git checkout` / `git reset --hard` when
+	// they exist). The deny was added to prevent the wrapped CLI from
+	// reading or writing dotenv secrets generally; this flag narrows
+	// the relaxation to the workspace and keeps .env files outside it
+	// (anywhere else on disk) denied. Does NOT relax `.envrc` —
+	// direnv's format is a shell script sourced on the user's next cd,
+	// a different RCE risk class that needs a separate flag.
+	AllowWorkspaceDotenv bool
+	AllowSysVShm         bool // default false; opt-in. Allow ipc-sysv-shm (needed by Postgres initdb, etc.)
+	StrictSysctl         bool // default false; when true, block kern.proc.* enumeration
 	// StrictMachLookup, when true, replaces the blanket (allow mach-lookup)
 	// with an enumerated allowlist of XPC/Mach service names — closing the
 	// known gap where the wrapped agent could reach com.apple.securityd
@@ -548,6 +560,30 @@ func emitDenyOverrides(b *strings.Builder, o ProfileOptions) {
 	line("; ============================================================")
 	for _, p := range []string{"/etc/ssl/cert.pem", "/private/etc/ssl/cert.pem"} {
 		line(fmt.Sprintf(`(allow file-read* (literal %s))`, lit(p)))
+	}
+
+	if o.Policy.AllowWorkspaceDotenv {
+		line("")
+		line("; ============================================================")
+		line("; WORKSPACE DOTENV RE-ALLOW — overrides the *.env regex deny.")
+		line("; The global *.env deny prevents the wrapped CLI from reading")
+		line("; or writing dotenv secrets anywhere on disk. This re-allow")
+		line("; narrows the relaxation to files inside writable workspace")
+		line("; paths so `git checkout` and `git reset --hard` can")
+		line("; materialize committed .env files. Anchored to the workspace")
+		line("; prefix; .env files outside the workspace remain denied.")
+		line("; .envrc is NOT re-allowed here — direnv's format is sourced")
+		line("; on the user's next cd into the dir, a separate RCE risk.")
+		line("; Re-allow is emitted LAST so last-match-wins makes it stick.")
+		line("; ============================================================")
+		for _, wp := range o.WritablePaths {
+			// Clean before substituting — extra_writable entries from project
+			// .ora.toml are not normalized by buildWritablePaths, so a
+			// trailing slash would produce `^/path//.*\.env$` and silently
+			// fail to match real `/path/foo.env` requests.
+			pattern := "^" + regexp.QuoteMeta(filepath.Clean(wp)) + `/.*\.env$`
+			line(fmt.Sprintf(`(allow file-read* file-write* (regex #"%s"))`, pattern))
+		}
 	}
 }
 

@@ -28,6 +28,9 @@ changes require a major-version bump.
     `AllowSysVShm`, `StrictSysctl`
   - `StrictMachLookup bool` — opt-in enumerated XPC allowlist that
     replaces the blanket `(allow mach-lookup)` (added in unreleased)
+  - `AllowWorkspaceDotenv bool` — opt-in workspace-scoped re-allow of
+    `.env` files, overriding the global `*.env` regex deny inside the
+    writable workspace tree (added in unreleased)
 - `ParseSandboxLogLine`, `SandboxDenyEvent`
 - `ErrLogMonitorUnsupported`
 - `StartLogMonitor`, `SelfTestLogStream` (macOS-only at runtime; will move

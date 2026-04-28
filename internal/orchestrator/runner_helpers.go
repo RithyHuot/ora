@@ -169,6 +169,7 @@ func (r *Runner) buildAndWriteProfile(sess *session.Session, home string, writab
 		Policy: sandbox.ProfilePolicy{
 			AllowNpmrc:              r.Config.AllowNpmrc,
 			AllowWorkspaceGitConfig: r.Config.AllowWorkspaceGitConfig,
+			AllowWorkspaceDotenv:    r.Config.AllowWorkspaceDotenv,
 			AllowSysVShm:            r.Config.AllowSysVShm,
 			StrictSysctl:            r.Config.StrictSysctl,
 			StrictMachLookup:        r.Config.StrictMachLookup,

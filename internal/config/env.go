@@ -20,6 +20,14 @@ type Config struct {
 	// AllowWorkspaceGitConfig opts in to writes on $WORKSPACE/.git/config. Default false:
 	// .git/config is a documented RCE primitive ([core] hooksPath, [alias] foo = !cmd).
 	AllowWorkspaceGitConfig bool
+	// AllowWorkspaceDotenv re-allows read+write on `.env` files inside the
+	// workspace, overriding the global *.env regex deny. Default false:
+	// dotenv files commonly contain secrets and the deny exists to prevent
+	// the wrapped CLI from reading them. Opt-in for repos that commit
+	// `.env` files (uncommon but breaks `git checkout` / `git reset --hard`
+	// when present). Does NOT relax `.envrc` — direnv's shell-script format
+	// is a separate RCE risk class.
+	AllowWorkspaceDotenv bool
 	// AllowUnixSockets is a list of absolute Unix-socket-path subpaths the
 	// sandboxed process may bind/connect to. Empty (default) blocks all UDS.
 	// Each entry becomes a (subpath …) rule.
@@ -86,6 +94,11 @@ func LoadEnv() Config {
 	if v := os.Getenv("ORA_ALLOW_NPMRC"); v != "" {
 		if b, ok := parseBool(v); ok {
 			c.AllowNpmrc = b
+		}
+	}
+	if v := os.Getenv("ORA_ALLOW_WORKSPACE_DOTENV"); v != "" {
+		if b, ok := parseBool(v); ok {
+			c.AllowWorkspaceDotenv = b
 		}
 	}
 	if v := os.Getenv("ORA_ALLOWED_DOMAINS"); v != "" {

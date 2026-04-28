@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `pkg/sandbox.ProfilePolicy.AllowWorkspaceDotenv bool` (TOML
+  `allow_workspace_dotenv`, env `ORA_ALLOW_WORKSPACE_DOTENV`) — opt-in
+  toggle that re-allows read+write on `.env` files inside the
+  workspace, overriding the global `*.env` regex deny. The global deny
+  exists to keep dotenv secrets unreadable to the wrapped CLI by
+  default; the flag narrows the relaxation to files inside the
+  resolved writable workspace path(s) so `git checkout` and `git reset
+  --hard` can materialize committed `.env` files in repos that ship
+  them. The re-allow is emitted as a workspace-anchored regex
+  (`^<workspace>/.*\.env$`) AFTER the mandatory `*.env` regex deny so
+  Seatbelt's last-match-wins semantics let the workspace allow win
+  inside the tree while files outside it stay denied. Does **not**
+  relax `.envrc` — direnv's shell-script format is sourced on the
+  user's next `cd` and is a separate RCE risk class. Default off.
 - The XDG global git config path `~/.config/git/` is now a read-only
   subpath inside the sandbox, alongside the existing `~/.gitconfig`
   literal-read allow. Both are gated by the same

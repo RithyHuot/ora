@@ -563,6 +563,102 @@ func TestGenerateProfile_AllowsGitConfigWhenOptIn(t *testing.T) {
 	}
 }
 
+// TestGenerateProfile_DeniesWorkspaceDotenvByDefault verifies that the
+// global *.env regex deny still fires for files inside the workspace
+// when AllowWorkspaceDotenv=false (the secure default). The deny is
+// what blocks `git reset --hard` and `git checkout` from materializing
+// committed .env files.
+func TestGenerateProfile_DeniesWorkspaceDotenvByDefault(t *testing.T) {
+	o := baseOpts()
+	o.Policy.AllowWorkspaceDotenv = false
+	got, err := GenerateProfile(o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Global mandatory regex must always be present.
+	if !strings.Contains(got, `(deny file-read* file-write* (regex #"^.*\.env$"))`) {
+		t.Errorf("global *.env regex deny is missing — secret-leak protection regressed")
+	}
+	// And NO workspace re-allow when the flag is off.
+	if strings.Contains(got, `(allow file-read* file-write* (regex #"^/Users/alice/code/proj/.*\.env$"))`) {
+		t.Errorf("expected NO workspace .env re-allow when AllowWorkspaceDotenv=false")
+	}
+}
+
+// TestGenerateProfile_ReAllowsWorkspaceDotenvWhenOptIn verifies that
+// AllowWorkspaceDotenv=true emits a regex re-allow for .env files
+// scoped to each writable workspace path, and that the re-allow is
+// emitted AFTER the global mandatory regex deny so Seatbelt's
+// last-match-wins semantics let the workspace-scoped allow override.
+func TestGenerateProfile_ReAllowsWorkspaceDotenvWhenOptIn(t *testing.T) {
+	o := baseOpts()
+	o.Policy.AllowWorkspaceDotenv = true
+	got, err := GenerateProfile(o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Global deny still emitted (we don't remove it; we override).
+	denyIdx := strings.Index(got, `(deny file-read* file-write* (regex #"^.*\.env$"))`)
+	if denyIdx < 0 {
+		t.Fatalf("global *.env regex deny missing from profile — must remain to block .env files outside the workspace")
+	}
+	want := `(allow file-read* file-write* (regex #"^/Users/alice/code/proj/.*\.env$"))`
+	allowIdx := strings.Index(got, want)
+	if allowIdx < 0 {
+		t.Errorf("profile missing workspace .env re-allow %q", want)
+	}
+	if allowIdx >= 0 && allowIdx < denyIdx {
+		t.Errorf("workspace .env re-allow must appear AFTER global *.env deny (allow=%d, deny=%d) — last-match-wins requires the allow to come last", allowIdx, denyIdx)
+	}
+}
+
+// TestGenerateProfile_AllowWorkspaceDotenv_NormalizesTrailingSlash
+// verifies that workspace paths with a trailing slash (which can
+// reach the profile via project `.ora.toml` extra_writable entries —
+// buildWritablePaths does not normalize them) still produce a
+// well-formed regex. Without filepath.Clean, the pattern would be
+// `^/path//.*\.env$` and silently fail to match real `/path/foo.env`
+// requests, leaving the user's opt-in inert.
+func TestGenerateProfile_AllowWorkspaceDotenv_NormalizesTrailingSlash(t *testing.T) {
+	o := baseOpts()
+	o.Policy.AllowWorkspaceDotenv = true
+	o.WritablePaths = []string{"/Users/alice/code/proj/"}
+	got, err := GenerateProfile(o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `(allow file-read* file-write* (regex #"^/Users/alice/code/proj/.*\.env$"))`
+	if !strings.Contains(got, want) {
+		t.Errorf("trailing-slash workspace must emit normalized pattern %q", want)
+	}
+	if strings.Contains(got, `^/Users/alice/code/proj//.*\.env$`) {
+		t.Errorf("emitted regex must not contain a doubled slash — would fail to match real paths")
+	}
+}
+
+// TestGenerateProfile_AllowWorkspaceDotenv_KeepsEnvrcDenied verifies
+// that opting in to .env does NOT relax the .envrc deny. .envrc is a
+// direnv RCE primitive (sourced on next cd into the workspace);
+// re-allowing it would let a sandboxed agent plant code that runs
+// outside the sandbox. The flag's name and docs are scoped to .env
+// only — anyone who needs .envrc takes a separate, louder opt-in.
+func TestGenerateProfile_AllowWorkspaceDotenv_KeepsEnvrcDenied(t *testing.T) {
+	o := baseOpts()
+	o.Policy.AllowWorkspaceDotenv = true
+	got, err := GenerateProfile(o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, `(deny file-read* file-write* (regex #"^.*/\.envrc$"))`) {
+		t.Errorf("global .envrc deny must remain even with AllowWorkspaceDotenv=true")
+	}
+	// No workspace .envrc re-allow should be emitted under this flag.
+	if strings.Contains(got, `(allow file-read* file-write* (regex #"^/Users/alice/code/proj/.*\.envrc"))`) ||
+		strings.Contains(got, `(allow file-read* file-write* (regex #"^/Users/alice/code/proj/.*/\.envrc$"))`) {
+		t.Errorf("AllowWorkspaceDotenv must not re-allow .envrc — that's a separate, louder flag")
+	}
+}
+
 func TestGenerateProfile_AuthDirRO_EmitsReadOnly(t *testing.T) {
 	o := baseOpts()
 	o.AuthDirsRW = nil

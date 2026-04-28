@@ -119,6 +119,12 @@ Denied inside every writable path (project directory):
 - `.ripgreprc` (literal deny — sourced by every `rg` invocation)
 - `.git/config` (literal deny when `allow_git_config = false`, the default)
 
+## Workspace-Scoped Opt-In Re-Allows
+
+Some mandatory denies block real-world workflows on opt-in repos. These flags relax the deny **only inside the writable workspace tree**, leaving global protection intact:
+
+- `allow_workspace_dotenv` (`bool`, default `false`) — re-allows read+write on `.env` files inside the workspace, overriding the global `*.env` regex deny. Files outside the workspace remain denied. `.envrc` is **not** re-allowed by this flag — direnv's shell-script format is a separate RCE risk class. Enable when a repo commits `.env` files and `git checkout` / `git reset --hard` would otherwise abort.
+
 ## Ancestor Symlink-Create Denies
 
 Seatbelt evaluates deny rules against the *requested* path, not its resolved

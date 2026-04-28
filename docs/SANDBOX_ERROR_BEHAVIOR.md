@@ -137,6 +137,7 @@ Add the path or domain to your allowlist:
 - **Unix domain sockets:** `ORA_ALLOW_UNIX_SOCKETS=/tmp/mcp-server.sock` or `paths.allow_unix_sockets` in `.ora.toml`
 - **Read `~/.npmrc`:** `ORA_ALLOW_NPMRC=true` (contains publish auth tokens; use with caution)
 - **Read/write `.git/config`:** `paths.allow_git_config = true` (RCE primitive; only in trusted repos)
+- **Read/write workspace `.env` files** (`error: unable to create file ...env: File exists` during `git checkout` / `git reset --hard`): `paths.allow_workspace_dotenv = true` or `ORA_ALLOW_WORKSPACE_DOTENV=1` (workspace-scoped; does **not** relax `.envrc`)
 
 ### If the operation is a security risk
 
