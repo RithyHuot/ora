@@ -277,6 +277,105 @@ ora ollama run llama3.2
 # any HTTPS attempt the model triggers is denied at both the proxy and the kernel
 ```
 
+### Add an MCP server to a wrapped provider (e.g. Playwright)
+
+Each AI CLI stores MCP server config in its own home-dir file. Workspace `.mcp.json` is intentionally denied by ora's profile (a malicious dependency could write one and trigger RCE on next launch), so MCP config goes in the user's home directory:
+
+| Provider | Config file | Section |
+|---|---|---|
+| claude | `~/.claude.json` | `mcpServers` |
+| codex | `~/.codex/config.toml` | `[mcp_servers.<name>]` |
+| gemini | `~/.gemini/settings.json` | `mcpServers` |
+| opencode | `~/.config/opencode/opencode.json` | `mcp` |
+
+#### Worked example: Playwright MCP
+
+[`@playwright/mcp`](https://github.com/microsoft/playwright-mcp) drives a real browser and is a useful example because it exercises three things most MCP servers do not: it (a) writes Playwright's browser cache, (b) launches chromium/firefox/webkit subprocesses, and (c) navigates to user-supplied URLs that aren't in the default egress allowlist.
+
+**1. Install Playwright + the MCP server outside the sandbox once** (so the browser binaries land in `~/Library/Caches/ms-playwright`):
+
+```sh
+npx -y @playwright/mcp@latest --help     # also fetches browsers on first run
+```
+
+**2. Add the server to the provider's config.**
+
+claude — `~/.claude.json`:
+```json
+{
+  "mcpServers": {
+    "playwright": {
+      "command": "npx",
+      "args": ["-y", "@playwright/mcp@latest"]
+    }
+  }
+}
+```
+
+codex — `~/.codex/config.toml`:
+```toml
+[mcp_servers.playwright]
+command = "npx"
+args = ["-y", "@playwright/mcp@latest"]
+```
+
+gemini — `~/.gemini/settings.json`:
+```json
+{
+  "mcpServers": {
+    "playwright": {
+      "command": "npx",
+      "args": ["-y", "@playwright/mcp@latest"]
+    }
+  }
+}
+```
+
+opencode — `~/.config/opencode/opencode.json`:
+```json
+{
+  "mcp": {
+    "playwright": {
+      "type": "local",
+      "command": ["npx", "-y", "@playwright/mcp@latest"],
+      "enabled": true
+    }
+  }
+}
+```
+
+**3. Extend ora's policy** so the Playwright cache is writable and the domains the browser needs to reach are allowlisted. Use `~/.config/ora/config.toml` (user-wide) or a project `.ora.toml` (per-repo, requires `ora trust add`):
+
+```toml
+[paths]
+extra_writable = [
+  "~/Library/Caches/ms-playwright",   # browser binaries Playwright caches
+]
+
+[egress]
+extra_domains = [
+  "cdn.playwright.dev",               # Playwright fetches browser updates here
+  # plus the sites the agent will actually navigate to:
+  "example.com",
+  "*.your-app.com",
+]
+```
+
+**4. Run as usual.**
+
+```sh
+ora trust add        # only if the config lives in a project .ora.toml
+ora claude           # or codex / gemini / opencode
+```
+
+Inside the agent, ask it to use the Playwright tools (e.g. *"open https://example.com and read the title"*). The first invocation may take longer as Playwright extracts cached browsers.
+
+**Known limitations.**
+
+- Browser subprocesses inherit ora's sandbox. If a Playwright operation fails with an `EPERM` or sandbox denial, run with `--verbose` to see which path or domain was denied and add it to `extra_writable` / `extra_domains`.
+- Output paths: Playwright traces, videos, and screenshots default to the working directory (already writable). If you redirect them under `$HOME` (e.g. `~/Documents/playwright-traces`), add that path to `extra_writable`.
+- Egress is per-invocation: closing the `ora` session tears down the proxy and the wrapped processes.
+
 ### Talk to a local MCP server over a Unix socket
 
 MCP servers commonly listen on a UDS. Allow exactly that one socket and nothing else — the agent gets the tool it needs without losing the rest of the sandbox:
