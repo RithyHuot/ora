@@ -48,6 +48,17 @@ func hintForPath(path string, workspaces []string) string {
 	clean := filepath.Clean(path)
 	base := filepath.Base(clean)
 
+	// .git/hooks inside a workspace — the allow_git_hooks flag covers
+	// this. RCE primitive (pre-commit hooks, husky, lint-staged run on
+	// git commit) so the hint warns about that explicitly.
+	// The deny is a subpath, so denied paths can be the directory itself
+	// or any file underneath it.
+	if isGitHooksPath(clean) {
+		if pathIsInsideAny(clean, workspaces) {
+			return "set `ORA_GIT_HOOKS=1` or `paths.allow_git_hooks = true` to allow workspace .git/hooks (RCE primitive — hooks run on git commit)"
+		}
+	}
+
 	// .git/config inside a workspace — the existing allow_git_config
 	// flag covers this. RCE primitive (core.hooksPath, alias = !cmd)
 	// so the hint warns about that explicitly.
@@ -111,6 +122,28 @@ func isHomeDotfile(clean string) bool {
 	}
 	grand := filepath.Dir(parent)
 	return grand == "/Users" || grand == "/home"
+}
+
+// isGitHooksPath reports whether clean is .git/hooks or a file/directory
+// inside .git/hooks. Used to scope the allow_git_hooks hint.
+func isGitHooksPath(clean string) bool {
+	// Direct match: .../.git/hooks
+	if filepath.Base(clean) == "hooks" && filepath.Base(filepath.Dir(clean)) == ".git" {
+		return true
+	}
+	// File inside: .../.git/hooks/pre-commit, .../.git/hooks/applypatch-msg, etc.
+	dir := clean
+	for {
+		parent := filepath.Dir(dir)
+		if parent == dir || parent == "/" || parent == "." {
+			break
+		}
+		if filepath.Base(parent) == "hooks" && filepath.Base(filepath.Dir(parent)) == ".git" {
+			return true
+		}
+		dir = parent
+	}
+	return false
 }
 
 // pathIsInsideAny reports whether clean is at or below any of the

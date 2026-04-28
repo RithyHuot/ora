@@ -2,6 +2,67 @@ package denials
 
 import "testing"
 
+// TestHintFor_WorkspaceGitHooks: a denied .git/hooks inside the
+// workspace should map to the allow_git_hooks opt-in hint.
+func TestHintFor_WorkspaceGitHooks(t *testing.T) {
+	for _, p := range []string{
+		"/Users/alice/code/proj/.git/hooks",
+		"/Users/alice/code/proj/.git/hooks/pre-commit",
+	} {
+		e := Event{
+			Kind:      KindFs,
+			Operation: "file-read-data",
+			Path:      p,
+		}
+		got := HintFor(e, []string{"/Users/alice/code/proj"})
+		if got == "" {
+			t.Fatalf("expected hint for workspace .git/hooks path %s, got empty", p)
+		}
+		if !contains(got, "allow_git_hooks") && !contains(got, "GIT_HOOKS") {
+			t.Errorf("hint should mention allow_git_hooks/GIT_HOOKS; got %q", got)
+		}
+		if !contains(got, "trusted") && !contains(got, "RCE") {
+			t.Errorf("hint should warn about RCE/trusted risk; got %q", got)
+		}
+	}
+}
+
+// TestHintFor_GitHooksOutsideWorkspace: a .git/hooks path outside any
+// workspace should NOT suggest allow_git_hooks (the flag is scoped to the
+// workspace and wouldn't help).
+func TestHintFor_GitHooksOutsideWorkspace(t *testing.T) {
+	e := Event{Kind: KindFs, Path: "/opt/somelib/.git/hooks/pre-commit"}
+	got := HintFor(e, []string{"/Users/alice/code/proj"})
+	if contains(got, "allow_git_hooks") || contains(got, "GIT_HOOKS") {
+		t.Errorf("must NOT suggest allow_git_hooks for .git/hooks outside workspace; got %q", got)
+	}
+}
+
+// TestIsGitHooksPath covers the helper that matches .git/hooks and files
+// beneath it, verifying it doesn't false-positive on unrelated paths.
+func TestIsGitHooksPath(t *testing.T) {
+	tests := []struct {
+		path string
+		want bool
+	}{
+		{"/Users/alice/code/proj/.git/hooks", true},
+		{"/Users/alice/code/proj/.git/hooks/pre-commit", true},
+		{"/Users/alice/code/proj/.git/hooks/applypatch-msg", true},
+		{"/Users/alice/code/proj/.git/hooks/pre-commit.d/hook.sh", true},
+		{"/opt/homebrew/hooks", false},
+		{"/usr/lib/git-core/hooks", false},
+		{"/Users/alice/.git/hooks", true}, // path is .git/hooks even outside workspace
+		{"/hooks", false},
+		{"/some/path/hooks", false},
+	}
+	for _, tt := range tests {
+		got := isGitHooksPath(tt.path)
+		if got != tt.want {
+			t.Errorf("isGitHooksPath(%q) = %v, want %v", tt.path, got, tt.want)
+		}
+	}
+}
+
 // TestHintFor_WorkspaceGitConfig: a denied .git/config inside the
 // workspace should map to the allow_git_config opt-in hint.
 func TestHintFor_WorkspaceGitConfig(t *testing.T) {

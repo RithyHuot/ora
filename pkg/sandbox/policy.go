@@ -125,7 +125,7 @@ func defaultDenies() []DenyEntry {
 		{`^.*/id_rsa.*$`, DenyKindRegex, DenyScopeGlobal, "SSH keypair (RSA)"},
 		{`^.*/id_ed25519.*$`, DenyKindRegex, DenyScopeGlobal, "SSH keypair (Ed25519)"},
 		// ─── Workspace subpaths ────────────────────────────────────────
-		{".git/hooks", DenyKindSubpath, DenyScopeWorkspace, "RCE on next git commit/checkout"},
+		{".git/hooks", DenyKindSubpath, DenyScopeWorkspace, "RCE via git hooks (pre-commit, husky, lint-staged)"},
 		// ─── Workspace literal files ───────────────────────────────────
 		{".gitmodules", DenyKindLiteral, DenyScopeWorkspace, "RCE on next `git submodule update`"},
 		{".mcp.json", DenyKindLiteral, DenyScopeWorkspace, "RCE on next Claude Code launch"},
@@ -186,12 +186,28 @@ var (
 )
 
 // workspaceDenyLiteralsWhenGitConfigDenied returns the workspace literal
-// list with `.git/config` prepended. Profile generation calls this when
+// deny list with `.git/config` prepended. Profile generation calls this when
 // AllowWorkspaceGitConfig is false (the secure default).
 func workspaceDenyLiteralsWhenGitConfigDenied() []string {
 	out := make([]string, 0, len(workspaceDenyLiterals)+1)
 	out = append(out, ".git/config")
 	out = append(out, workspaceDenyLiterals...)
+	return out
+}
+
+// workspaceDenyPathsWithoutGitHooks returns the workspace subpath deny list
+// with `.git/hooks` removed. Profile generation calls this when
+// AllowGitHooks is true (the opt-in that allows pre-commit hooks to run
+// inside the sandbox). When false (the secure default), the full list is
+// used and .git/hooks remains denied.
+func workspaceDenyPathsWithoutGitHooks() []string {
+	out := make([]string, 0, len(workspaceDenyPaths))
+	for _, p := range workspaceDenyPaths {
+		if p == ".git/hooks" {
+			continue
+		}
+		out = append(out, p)
+	}
 	return out
 }
 

@@ -94,6 +94,7 @@ errors fail loudly with the offending entry named.
 | `ORA_I_UNDERSTAND_UNSANDBOXED` | `bool` | `false` | Acknowledgement required when `ORA_NATIVE_KERNEL=false`. |
 | `ORA_AUTH_DIR_MODE` | `string` | `readwrite` | `"readonly"` to disable token refresh. Affects all providers. |
 | `ORA_ALLOW_NPMRC` | `bool` | `false` | `true` to allow reading `~/.npmrc`. |
+| `ORA_GIT_HOOKS` | `bool` | `false` | `true` to allow read+execute access to `$WORKSPACE/.git/hooks`. **Warning:** `.git/hooks` is an RCE primitive — pre-commit, husky, and lint-staged hooks run on `git commit`. Only enable in trusted repositories. Equivalent to `[paths] allow_git_hooks = true` in TOML. |
 | `ORA_ALLOW_WORKSPACE_DOTENV` | `bool` | `false` | `true` to re-allow read+write on `.env` files inside the workspace, overriding the global `*.env` regex deny. Equivalent to `[paths] allow_workspace_dotenv = true` in TOML. |
 | `ORA_ALLOWED_DOMAINS` | `string` | (built-ins) | Comma-separated extra HTTPS domains (e.g. `api.mycorp.com,*.internal`). |
 | `ORA_ALLOW_UNIX_SOCKETS` | `string` | (empty) | Comma-separated absolute Unix socket paths to allow bind/connect. |
@@ -121,6 +122,7 @@ Top-level sections: `[egress]`, `[paths]`.
 |---|---|---|---|
 | `allow_npmrc` | `bool` | `false` | Allow reading `~/.npmrc` inside the sandbox. |
 | `allow_git_config` | `bool` | `false` | Allow read+write access to `$WORKSPACE/.git/config`. **Warning:** `.git/config` is an RCE primitive (`core.hooksPath`, `alias` exec). Only enable in trusted repositories. |
+| `allow_git_hooks` | `bool` | `false` | Allow read+execute access to `$WORKSPACE/.git/hooks`. **Warning:** `.git/hooks` is an RCE primitive — pre-commit, husky, and lint-staged hooks run on `git commit`. Only enable in trusted repositories where the hooks are under code review. Equivalent to `ORA_GIT_HOOKS=1`. |
 | `allow_workspace_dotenv` | `bool` | `false` | Re-allow read+write on `.env` files inside the workspace, overriding the global `*.env` regex deny. Use when a repo commits `.env` files (uncommon) and `git checkout` / `git reset --hard` would otherwise abort with `error: unable to create file ...env: File exists`. Workspace-scoped — `.env` files outside the workspace stay denied. **Does not relax `.envrc`** — direnv's format is sourced on the user's next `cd` into the directory and is a separate RCE risk class. Equivalent to `ORA_ALLOW_WORKSPACE_DOTENV=1`. |
 | `allow_sysv_shm` | `bool` | `false` | Enable `ipc-sysv-shm` for POSIX shared memory operations (needed by tools like PostgreSQL `initdb`). |
 | `allow_unix_sockets` | `[]string` | `[]` | Absolute paths the sandbox may bind or connect to as Unix domain sockets. Each entry becomes a `(subpath ...)` Seatbelt rule. |

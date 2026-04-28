@@ -178,6 +178,9 @@ func TestLoadEnv_DefaultsWhenUnset(t *testing.T) {
 	if cfg.AllowNpmrc {
 		t.Error("AllowNpmrc should default to false")
 	}
+	if cfg.AllowGitHooks {
+		t.Error("AllowGitHooks should default to false")
+	}
 }
 
 func TestLoadEnv_ParsesBoolsAndDomains(t *testing.T) {
@@ -216,6 +219,23 @@ func TestLoadEnv_StrictMachLookup(t *testing.T) {
 	cfg = LoadEnv()
 	if cfg.StrictMachLookup {
 		t.Error("ORA_STRICT_MACH_LOOKUP=off should set StrictMachLookup=false")
+	}
+}
+
+func TestLoadEnv_GitHooks(t *testing.T) {
+	cfg := LoadEnv()
+	if cfg.AllowGitHooks {
+		t.Error("AllowGitHooks should default to false when env unset")
+	}
+	t.Setenv("ORA_GIT_HOOKS", "1")
+	cfg = LoadEnv()
+	if !cfg.AllowGitHooks {
+		t.Error("ORA_GIT_HOOKS=1 should set AllowGitHooks=true")
+	}
+	t.Setenv("ORA_GIT_HOOKS", "off")
+	cfg = LoadEnv()
+	if cfg.AllowGitHooks {
+		t.Error("ORA_GIT_HOOKS=off should set AllowGitHooks=false")
 	}
 }
 
@@ -261,6 +281,25 @@ extra_writable = ["/srv/cache"]
 	}
 }
 
+func TestLoadFile_ParsesAllowGitHooks(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	body := `
+[paths]
+allow_git_hooks = true
+`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.AllowGitHooks {
+		t.Error("AllowGitHooks should be true from TOML")
+	}
+}
+
 func TestMerge_LaterOverridesEarlier(t *testing.T) {
 	base := Config{NativeKernel: true, ExtraDomains: []string{"a.com"}, AllowNpmrc: false}
 	override := Config{NativeKernel: false, ExtraDomains: []string{"b.com"}, AllowNpmrc: true}
@@ -273,6 +312,20 @@ func TestMerge_LaterOverridesEarlier(t *testing.T) {
 	}
 	if len(got.ExtraDomains) != 2 {
 		t.Errorf("ExtraDomains should append: got %v", got.ExtraDomains)
+	}
+}
+
+func TestMerge_AllowGitHooks(t *testing.T) {
+	base := Config{NativeKernel: true, AllowGitHooks: false}
+	override := Config{NativeKernel: true, AllowGitHooks: true}
+	got := Merge(base, override)
+	if !got.AllowGitHooks {
+		t.Error("override AllowGitHooks=true should win")
+	}
+	// False → false stays false.
+	got2 := Merge(base, Config{NativeKernel: true})
+	if got2.AllowGitHooks {
+		t.Error("AllowGitHooks should stay false when override doesn't set it")
 	}
 }
 
