@@ -146,7 +146,7 @@ ${TMPDIR}/ora-sandbox-<ulid>.sb
 
 `pkg/proxy.Egress.Start`:
 
-1. Compiles the domain matcher from `sandbox.DefaultAllowedDomains` + `cfg.ExtraDomains` + `--allow` flags.
+1. Compiles the domain matcher from `sandbox.DefaultAllowedDomains` + the invoked provider's `ProviderSpec.AllowedDomains` (e.g. `models.dev` for opencode) + `cfg.ExtraDomains` + `--allow` flags.
 2. Binds `tcp` on `127.0.0.1:0` (kernel picks a free port).
 3. Starts an `http.Server` with a raw `HandlerFunc` that accepts only `CONNECT` methods.
 4. If `HTTPS_PROXY` is set in the host environment, `proxy.ResolveParentProxy` chains through it.
@@ -190,6 +190,7 @@ The profile is written to disk with mode `0600`.
 - **Strips** interpreter / dynamic-loader hooks that hijack process bootstrap (`NODE_OPTIONS`, `DYLD_*`, `PYTHONSTARTUP`, `BASH_ENV`, `RUBYOPT`, `PERL5OPT`, `JAVA_TOOL_OPTIONS`, `LD_PRELOAD`, …).
 - **Injects** `HTTPS_PROXY=http://127.0.0.1:<port>` (and lowercase variants).
 - **Injects** `NO_PROXY=localhost,127.0.0.1,::1`.
+- **Applies** the invoked provider's `ProviderSpec.EnvDefaults` via `exec.ApplyEnvDefaults` — KEY=VAL pairs are appended only when the user has not set the key themselves. Used to nudge sandbox-friendly behavior; e.g., claude ships with `DISABLE_TELEMETRY=1` so its synchronous Datadog flush does not hang on a non-allowlisted intake host.
 
 ### 9. Process wrap
 
@@ -258,7 +259,16 @@ Process model (`process-exec`, `process-fork`), `sysctl-read`, `mach-lookup`, `i
 - xcode-select symlinks (`/var/select/developer_dir`, `/var/db/xcode_select_link`, plus `/private/var/...` twins) granted as `literal` reads. `/usr/bin/git` is a libxcselect shim that resolves the active developer dir from these links before exec'ing the real git; without read access it concludes "no developer tools" and triggers the macOS Command Line Tools install dialog every run, even after CLT is installed. The literals expose only the symlink targets and dirent listings of `/var/select` and `/var/db` — not the contents of sibling system metadata files. When the active dir is under `/Library/Developer/CommandLineTools` (already granted as a subpath above) or when CLT is installed alongside Xcode (libxcselect falls back to CLT cleanly), no extra grant is emitted. For Xcode-only setups the `.app` bundle root is granted as a `subpath` so DVT* frameworks at sibling `<bundle>/Contents/{Frameworks,SharedFrameworks}` resolve. Selection logic lives in `sandbox.DetectXcodeReadSubpath`
 - Temp dirs (`/private/var/folders`, `/tmp`, `/private/tmp`)
 - Device files (`/dev/null`, `/dev/urandom`, etc.)
-- PTY devices (for `script(1)`)
+- PTY devices: three operation classes are granted on `/dev/tty`,
+  `/dev/ptmx`, `/dev/ttys[0-9]+`, and `/dev/pts/[0-9]+`:
+  (a) `file-read*`/`file-write*` for open + read/write on the slave/master,
+  (b) `file-ioctl` for `tcsetattr()` calls (Node `setRawMode`, `stty`,
+  any termios consumer), and
+  (c) `pseudo-tty` for `posix_openpt`/`grantpt`/`unlockpt` on children
+  that allocate their own PTY pair.
+  Without (b), gemini-cli's `setRawMode` aborts at startup with EPERM and
+  codex's interactive mode dies with `Operation not permitted (os error 1)`.
+  The grant set is modeled on Anthropic's `sandbox-runtime` PTY block.
 
 ### Layer 3: Deny overrides
 

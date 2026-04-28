@@ -44,7 +44,13 @@ changes require a major-version bump.
 
 ### `pkg/providers`
 
-- `ProviderSpec` struct
+- `ProviderSpec` struct, including the fields:
+  - `Name`, `BinNames`, `AuthDirsRW`, `LoginCommand`, `KnownIssues`,
+    `OwnEnvKeys`, `ProbeHost`
+  - `AllowedDomains []string` — per-provider extension to the global
+    egress allowlist (added in unreleased)
+  - `EnvDefaults map[string]string` — provider-recommended env vars
+    applied only when the user has not set the key (added in unreleased)
 - `ProviderSpec.IsBuiltin()`
 - `AuthResolver` type
 - `AuthDirEntry` struct, `AuthDirKind` type (`AuthDirKindDir`, `AuthDirKindFile`)
@@ -131,7 +137,8 @@ wrapped CLI to die at runtime when trying to read its own executable.
 
 ## Audit log
 
-This document was last reconciled against `go doc -all` on 2026-04-28.
+This document was last reconciled against `go doc -all` on 2026-04-28
+(post-`AllowedDomains`/`EnvDefaults` additions to `ProviderSpec`).
 When making any change to a `pkg/` exported symbol, update this file in
 the same commit. Run `go doc -all ./pkg/...` and grep against this file
 to catch drift.

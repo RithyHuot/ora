@@ -89,7 +89,9 @@ These are easy to break by accident — preserve them.
 ## Adding a new provider
 
 1. Add an `AuthResolver` in `pkg/providers/auth.go`.
-2. Add an entry to `pkg/providers.registry` in `pkg/providers/registry.go` with `Name`, `BinNames`, `AuthDirsRW`, `LoginCommand`, `OwnEnvKeys` (vendor's API keys), `ProbeHost`, `builtin: true`.
+2. Add an entry to `pkg/providers.registry` in `pkg/providers/registry.go` with `Name`, `BinNames`, `AuthDirsRW`, `LoginCommand`, `OwnEnvKeys` (vendor's API keys), `ProbeHost`, `builtin: true`. Optionally:
+   - `AllowedDomains` — domains the CLI requires beyond the global default list (e.g. a hosted catalog like opencode's `models.dev`). Each entry is validated through `proxy.ValidateAllowedDomain`.
+   - `EnvDefaults` — KEY=VAL pairs to set unless the user already did. Use sparingly — these change wrapped-CLI behavior. Current example: `DISABLE_TELEMETRY=1` for claude to suppress its Datadog flush.
 3. Tests in `pkg/providers/registry_test.go` and `pkg/providers/auth_test.go`.
 
 Out-of-tree providers register at runtime via `providers.Register(spec)` — see `CONTRIBUTING.md` for the example.
