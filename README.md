@@ -86,6 +86,60 @@ A successful verify line ("Verified OK") confirms the checksums file
 came from the tagged release workflow. Then `sha256sum -c checksums.txt`
 the binary tarball you downloaded.
 
+## Uninstall
+
+`ora` keeps no daemons or background services, so uninstalling is a matter of removing the binary and (optionally) the config directory.
+
+### 1. Remove the binary
+
+Match the method you installed with:
+
+```sh
+# go install
+rm "$(go env GOPATH)/bin/ora"
+
+# prebuilt binary from GitHub Releases
+sudo rm /usr/local/bin/ora
+
+# from source
+rm -rf ~/Documents/Github/ora      # or wherever you cloned
+```
+
+Confirm it's gone:
+
+```sh
+command -v ora || echo "ora removed"
+```
+
+### 2. Remove user state (optional)
+
+`ora` writes two files under `~/.config/ora/`:
+
+- `config.toml` — your user-level configuration
+- `trust.toml` — SHA-256 hashes of project `.ora.toml` files you've trusted
+
+```sh
+rm -rf ~/.config/ora
+```
+
+Skip this step if you plan to reinstall and want to keep your trust grants and config.
+
+### 3. Sweep stale profile files (optional)
+
+Each invocation writes a temporary Seatbelt profile to `$TMPDIR` and deletes it on exit. If a previous run was killed hard (SIGKILL, panic, power loss), a stale `ora-sandbox-*.sb` may remain. Clean them up before removing the binary:
+
+```sh
+ora doctor --sweep   # removes ora-sandbox-*.sb older than 24h
+```
+
+Or after the binary is gone:
+
+```sh
+rm -f "${TMPDIR:-/tmp}"/ora-sandbox-*.sb
+```
+
+`ora` does not install launchd agents, kernel extensions, or anything outside `$HOME` and `$TMPDIR` — there is nothing else to clean up.
+
 ## Quick start
 
 ```sh
