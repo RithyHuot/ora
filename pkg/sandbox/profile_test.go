@@ -674,6 +674,45 @@ func TestGenerateProfile_DefaultSysctlIsBlanket(t *testing.T) {
 	}
 }
 
+func TestGenerateProfile_DefaultMachLookupIsBlanket(t *testing.T) {
+	got, err := GenerateProfile(baseOpts())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "(allow mach-lookup)\n") {
+		t.Error("default (StrictMachLookup=false) should emit bare (allow mach-lookup)")
+	}
+	if strings.Contains(got, "(global-name") {
+		t.Error("default (StrictMachLookup=false) must not emit any (global-name ...) clauses")
+	}
+}
+
+func TestGenerateProfile_StrictMachLookupAllowlist(t *testing.T) {
+	o := baseOpts()
+	o.Policy.StrictMachLookup = true
+	got, err := GenerateProfile(o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The bare unrestricted form must be gone — strict mode replaces it.
+	if strings.Contains(got, "(allow mach-lookup)\n") {
+		t.Error("StrictMachLookup=true must NOT emit bare (allow mach-lookup)")
+	}
+	// Spot-check a few services from the Anthropic baseline plus the
+	// SecurityServer entry that filesystem denies otherwise can't protect.
+	for _, name := range []string{
+		"com.apple.securityd.xpc",
+		"com.apple.SecurityServer",
+		"com.apple.system.opendirectoryd.libinfo",
+		"com.apple.coreservices.launchservicesd",
+	} {
+		needle := `(global-name "` + name + `")`
+		if !strings.Contains(got, needle) {
+			t.Errorf("StrictMachLookup=true profile missing %s", needle)
+		}
+	}
+}
+
 func TestGenerateProfile_UnixSocketsAllowedWhenOptIn(t *testing.T) {
 	o := baseOpts()
 	o.AllowUnixSockets = []string{"/Users/alice/.docker/run", "/private/tmp/mcp"}

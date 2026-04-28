@@ -247,6 +247,8 @@ A generated profile is an S-expression text file with three conceptual layers:
 
 Process model (`process-exec`, `process-fork`), `sysctl-read`, `mach-lookup`, `ipc-posix-shm`, and loopback-only network. These are the minimum capabilities for a modern CLI to start and function.
 
+`mach-lookup` is granted unconditionally by default. Set `strict_mach_lookup = true` (TOML, under `[paths]`) or `ORA_STRICT_MACH_LOOKUP=1` to replace the blanket grant with an enumerated XPC service allowlist that excludes Keychain / 1Password XPC, closing the bypass where a sandboxed agent could reach those daemons despite `~/.config/op` / `~/.aws` filesystem denies. Off by default while per-provider compatibility against the strict list is being validated.
+
 ### Layer 2: Path allows
 
 - Workspace (`subpath` read+write)

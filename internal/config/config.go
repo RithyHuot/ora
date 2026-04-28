@@ -23,6 +23,7 @@ type fileShape struct {
 		AllowUnixSockets        []string `toml:"allow_unix_sockets"`
 		WorkDirScope            string   `toml:"workdir_scope"`
 		StrictSysctl            *bool    `toml:"strict_sysctl"`
+		StrictMachLookup        bool     `toml:"strict_mach_lookup"`
 		AuthDirMode             string   `toml:"auth_dir_mode"`
 	} `toml:"paths"`
 }
@@ -71,6 +72,7 @@ func ParseBytes(path string, b []byte) (Config, error) {
 	if f.Paths.StrictSysctl != nil {
 		c.StrictSysctl = *f.Paths.StrictSysctl
 	}
+	c.StrictMachLookup = f.Paths.StrictMachLookup
 	c.AuthDirMode = f.Paths.AuthDirMode
 	return c, nil
 }
@@ -107,6 +109,9 @@ func Merge(base, override Config) Config {
 	}
 	if override.StrictSysctl {
 		out.StrictSysctl = true
+	}
+	if override.StrictMachLookup {
+		out.StrictMachLookup = true
 	}
 	out.ExtraDomains = dedupStrings(append(append([]string{}, base.ExtraDomains...), override.ExtraDomains...))
 	out.ExtraWritable = dedupStrings(append(append([]string{}, base.ExtraWritable...), override.ExtraWritable...))

@@ -26,6 +26,17 @@ type ProfilePolicy struct {
 	AllowWorkspaceGitConfig bool // default false; opt-in. When false, $WS/.git/config is denied for read+write.
 	AllowSysVShm            bool // default false; opt-in. Allow ipc-sysv-shm (needed by Postgres initdb, etc.)
 	StrictSysctl            bool // default false; when true, block kern.proc.* enumeration
+	// StrictMachLookup, when true, replaces the blanket (allow mach-lookup)
+	// with an enumerated allowlist of XPC/Mach service names — closing the
+	// known gap where the wrapped agent could reach com.apple.securityd
+	// (Keychain SecItemCopyMatching) and 1Password / GUI password-manager
+	// XPC daemons that bypass our filesystem denies on ~/.config/op,
+	// ~/.aws, etc. Defaults off (zero value) because the strict allowlist
+	// has not been empirically validated against every wrapped CLI; opt-in
+	// adoption avoids breaking flows that rely on services not yet on the
+	// list. Toggled via ORA_STRICT_MACH_LOOKUP=1 or strict_mach_lookup =
+	// true in TOML.
+	StrictMachLookup bool
 }
 
 // ProfileOptions is the pure-function input to GenerateProfile. All paths
@@ -196,16 +207,48 @@ func emitCapabilityGrants(b *strings.Builder, o ProfileOptions) {
 	} else {
 		line("(allow sysctl-read)")
 	}
-	// Known limitation: unrestricted mach-lookup. This permits the sandboxed
-	// agent to reach Mach services that bypass our filesystem denies — most
-	// notably com.apple.securityd (Keychain SecItemCopyMatching) and the
-	// 1Password / GUI password-manager XPC daemons. The filesystem denies on
-	// ~/.config/op, ~/.aws, etc. do nothing if the agent talks to the daemon
-	// directly. Tightening to an enumerated allowlist requires per-provider
-	// empirical profiling of which services each CLI legitimately needs
-	// (notification-center, distnoted, runtime warnings, ...). See
-	// `ora doctor` for the runtime warning.
-	line("(allow mach-lookup)")
+	if o.Policy.StrictMachLookup {
+		// Strict mode: enumerated XPC/Mach service allowlist closes the
+		// "agent can talk to com.apple.securityd / 1Password XPC and bypass
+		// the ~/.config/op, ~/.aws etc. filesystem denies" gap. The list is
+		// the baseline Anthropic empirically validated for Bun-based CLIs in
+		// anthropic-experimental/sandbox-runtime — known-good for claude.
+		// Off by default (see ProfilePolicy.StrictMachLookup) because other
+		// providers have not yet been profiled against this list.
+		line("; mach-lookup — strict mode (enumerated XPC services)")
+		line("(allow mach-lookup")
+		for _, name := range []string{
+			"com.apple.audio.systemsoundserver",
+			"com.apple.distributed_notifications@Uv3",
+			"com.apple.FontObjectsServer",
+			"com.apple.fonts",
+			"com.apple.logd",
+			"com.apple.lsd.mapdb",
+			"com.apple.PowerManagement.control",
+			"com.apple.system.logger",
+			"com.apple.system.notification_center",
+			"com.apple.system.opendirectoryd.libinfo",
+			"com.apple.system.opendirectoryd.membership",
+			"com.apple.bsd.dirhelper",
+			"com.apple.securityd.xpc",
+			"com.apple.coreservices.launchservicesd",
+			"com.apple.SecurityServer",
+		} {
+			line(fmt.Sprintf(`  (global-name "%s")`, name))
+		}
+		line(")")
+	} else {
+		// Known limitation: unrestricted mach-lookup. This permits the sandboxed
+		// agent to reach Mach services that bypass our filesystem denies — most
+		// notably com.apple.securityd (Keychain SecItemCopyMatching) and the
+		// 1Password / GUI password-manager XPC daemons. The filesystem denies on
+		// ~/.config/op, ~/.aws, etc. do nothing if the agent talks to the daemon
+		// directly. Opt in to ProfilePolicy.StrictMachLookup (TOML
+		// strict_mach_lookup or ORA_STRICT_MACH_LOOKUP=1) for the enumerated
+		// allowlist; left off by default while per-provider compatibility is
+		// still being validated. See `ora doctor` for the runtime warning.
+		line("(allow mach-lookup)")
+	}
 	line("(allow ipc-posix-shm)")
 	if o.Policy.AllowSysVShm {
 		line("(allow ipc-sysv-shm)")

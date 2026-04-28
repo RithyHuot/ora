@@ -74,6 +74,7 @@ func runPolicyShow(out io.Writer, provider string) error {
 			AllowWorkspaceGitConfig: cfg.AllowWorkspaceGitConfig,
 			AllowSysVShm:            cfg.AllowSysVShm,
 			StrictSysctl:            cfg.StrictSysctl,
+			StrictMachLookup:        cfg.StrictMachLookup,
 		},
 	})
 	if err != nil {
