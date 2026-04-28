@@ -35,6 +35,13 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.25'
+      # syft generates the per-archive SBOMs declared in `.goreleaser.yml`
+      # (`sboms:` block). Without it goreleaser fails with
+      # `exec: "syft": executable file not found in $PATH`.
+      - uses: anchore/sbom-action/download-syft@v0
+      # cosign performs the keyless signing of `checksums.txt` declared in
+      # `.goreleaser.yml` (`signs:` block) using the workflow's OIDC token.
+      - uses: sigstore/cosign-installer@v3
       - uses: goreleaser/goreleaser-action@v6
         with:
           version: '~> v2'

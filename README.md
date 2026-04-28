@@ -72,7 +72,7 @@ Each release ships a `checksums.txt` and a cosign signature bundle.
 To verify before installing:
 
 ```sh
-VERSION=v0.1.0
+VERSION=v0.2.2
 curl -LO https://github.com/rithyhuot/ora/releases/download/$VERSION/checksums.txt
 curl -LO https://github.com/rithyhuot/ora/releases/download/$VERSION/checksums.txt.bundle
 cosign verify-blob \
@@ -202,7 +202,7 @@ Denied by default:
 
 | What | Example violation | Error you see |
 |---|---|---|
-| Write outside project/auth dirs | `echo x > /tmp/outside` | `Operation not permitted` |
+| Write outside project/auth dirs | `echo x > ~/elsewhere.txt` | `Operation not permitted` |
 | Read `~/.ssh` | `cat ~/.ssh/id_rsa` | `Operation not permitted` |
 | HTTPS to unlisted host | `curl https://evil.com` | proxy 403 or connection timeout |
 | Plain HTTP | `curl http://internal` | proxy 403 |
