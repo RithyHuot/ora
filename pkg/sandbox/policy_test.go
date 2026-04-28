@@ -150,7 +150,11 @@ func TestMandatoryDenyRegexes_CompileAndMatchCorrectly(t *testing.T) {
 }
 
 func TestDefaultAllowedDomains_IncludesCoreEndpoints(t *testing.T) {
-	want := []string{"api.openai.com", "github.com", "registry.npmjs.org", "huggingface.co"}
+	want := []string{
+		"api.openai.com", "github.com", "registry.npmjs.org", "huggingface.co",
+		"chatgpt.com",             // codex's "responses" backend
+		"mcp-proxy.anthropic.com", // claude-code's MCP relay
+	}
 	domains := defaultAllowedDomains()
 	set := make(map[string]struct{}, len(domains))
 	for _, d := range domains {

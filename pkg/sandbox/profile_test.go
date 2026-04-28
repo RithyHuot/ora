@@ -15,7 +15,7 @@ func baseOpts() ProfileOptions {
 			{Path: "/Users/alice/.claude", Kind: providers.AuthDirKindDir},
 			{Path: "/Users/alice/.claude.json", Kind: providers.AuthDirKindFile},
 		},
-		NodeBinDir:     "/opt/homebrew/bin",
+		NodeBinDirs:    []string{"/opt/homebrew/bin"},
 		HomebrewRoots:  []string{"/opt/homebrew"},
 		VersionMgrDirs: []string{},
 		Policy: ProfilePolicy{
@@ -162,6 +162,174 @@ func TestGenerateProfile_GitconfigAllowedReadOnly(t *testing.T) {
 	}
 }
 
+func TestGenerateProfile_EmitsKeychainsRead(t *testing.T) {
+	// macOS Keychain access (used by claude OAuth) needs read on the
+	// keychain DB files; the actual decrypt happens via securityd XPC,
+	// already covered by mach-lookup.
+	got, err := GenerateProfile(baseOpts())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `(allow file-read* (subpath "/Users/alice/Library/Keychains"))`
+	if !strings.Contains(got, want) {
+		t.Errorf("profile missing %q — Keychain auth will fail for any provider that uses it", want)
+	}
+	// The keychain dir's parent (~/Library) needs an lstat allow too,
+	// emitted via the ancestor-literals mechanism.
+	if !strings.Contains(got, `(allow file-read* (literal "/Users/alice/Library"))`) {
+		t.Errorf("profile missing /Users/alice/Library ancestor literal for Keychain path traversal")
+	}
+}
+
+func TestGenerateProfile_ReAllowsSystemTrustStore(t *testing.T) {
+	// The *.pem regex deny over-matches the system trust store at
+	// /etc/ssl/cert.pem. Re-allowing it as a literal AFTER the regex deny
+	// lets TLS-using CLIs (codex etc.) validate certificate chains.
+	got, err := GenerateProfile(baseOpts())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`(allow file-read* (literal "/etc/ssl/cert.pem"))`,
+		`(allow file-read* (literal "/private/etc/ssl/cert.pem"))`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("profile missing system trust store re-allow: %s", want)
+		}
+	}
+	// Sanity: the re-allow must appear AFTER the regex deny in source order.
+	denyIdx := strings.Index(got, `(deny file-read* file-write* (regex #"^.*\.pem$"))`)
+	allowIdx := strings.Index(got, `(allow file-read* (literal "/etc/ssl/cert.pem"))`)
+	if denyIdx < 0 || allowIdx < 0 || allowIdx < denyIdx {
+		t.Errorf("trust-store re-allow must come after .pem regex deny (deny=%d, allow=%d)", denyIdx, allowIdx)
+	}
+}
+
+func TestGenerateProfile_EmitsUsrShareForICU(t *testing.T) {
+	// Bun standalone executables (claude, opencode) load macOS ICU data
+	// from /usr/share/icu lazily on Intl.Segmenter init. Without this
+	// allow they die with "failed to initialize Segmenter".
+	got, err := GenerateProfile(baseOpts())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, `(allow file-read* (subpath "/usr/share"))`) {
+		t.Errorf("profile missing /usr/share allow — Intl.Segmenter init will fail in Bun-based CLIs")
+	}
+}
+
+func TestGenerateProfile_EmitsHomeAncestorLiterals(t *testing.T) {
+	// macOS 26 evaluates each path component independently for lstat/realpath
+	// walks. Without (literal "/Users") the wrapped CLI dies with EPERM on
+	// lstat('/Users') before it can reach HomeDir (already covered).
+	got, err := GenerateProfile(baseOpts())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, `(allow file-read* (literal "/Users"))`) {
+		t.Errorf("profile missing /Users ancestor literal — Node realpath will fail on macOS 26\n%s", got)
+	}
+}
+
+func TestGenerateProfile_HomeDirLiteralEmittedExactlyOnce(t *testing.T) {
+	// Regression test: when WritablePaths is inside HomeDir, the workspace's
+	// ancestor chain includes HomeDir itself, and the explicit HomeDir
+	// literal allow would otherwise emit it a second time.
+	got, err := GenerateProfile(baseOpts())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `(allow file-read* (literal "/Users/alice"))`
+	count := strings.Count(got, want)
+	if count != 1 {
+		t.Errorf("expected HomeDir literal allow exactly once, got %d:\n%s", count, got)
+	}
+}
+
+func TestGenerateProfile_WorkspaceOutsideHomeStillEmitsHome(t *testing.T) {
+	// When the workspace is outside HOME, ancestorLiterals(roots) won't
+	// produce HomeDir as an ancestor (HomeDir has no descendant in the input
+	// list other than itself), so the explicit HomeDir literal must still
+	// fire.
+	o := baseOpts()
+	o.WritablePaths = []string{"/data/proj"}
+	o.AuthDirsRW = nil
+	got, err := GenerateProfile(o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`(allow file-read* (literal "/Users/alice"))`, // HomeDir explicit
+		`(allow file-read* (literal "/Users"))`,       // HomeDir ancestor
+		`(allow file-read* (literal "/data"))`,        // workspace ancestor
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("profile missing %q for workspace-outside-HOME layout", want)
+		}
+	}
+}
+
+func TestGenerateProfile_EmitsWorkspaceAncestorLiterals(t *testing.T) {
+	// Gemini's robustRealpath walks the workspace path; without ancestor
+	// allows it dies with EPERM on lstat('/Users/alice/code') before reaching
+	// the granted workspace subpath.
+	got, err := GenerateProfile(baseOpts())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`(allow file-read* (literal "/Users/alice/code"))`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("profile missing workspace ancestor literal: %s", want)
+		}
+	}
+}
+
+func TestGenerateProfile_EmitsAllHomeAncestorsForDeepHome(t *testing.T) {
+	o := baseOpts()
+	// Sandbox-style HOMEs land deep under /private/var/folders.
+	o.HomeDir = "/private/var/folders/aa/bb/T/home"
+	o.WritablePaths = []string{"/private/var/folders/aa/bb/T/home/work"}
+	o.AuthDirsRW = nil
+	got, err := GenerateProfile(o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`(allow file-read* (literal "/private"))`,
+		`(allow file-read* (literal "/private/var"))`,
+		`(allow file-read* (literal "/private/var/folders"))`,
+		`(allow file-read* (literal "/private/var/folders/aa"))`,
+		`(allow file-read* (literal "/private/var/folders/aa/bb"))`,
+		`(allow file-read* (literal "/private/var/folders/aa/bb/T"))`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("profile missing ancestor literal: %s", want)
+		}
+	}
+}
+
+func TestGenerateProfile_NodeBinDirsEmitsEachEntry(t *testing.T) {
+	o := baseOpts()
+	o.NodeBinDirs = []string{
+		"/Users/alice/.local/bin",
+		"/Users/alice/.local/share/claude/versions",
+	}
+	got, err := GenerateProfile(o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`(allow file-read* (subpath "/Users/alice/.local/bin"))`,
+		`(allow file-read* (subpath "/Users/alice/.local/share/claude/versions"))`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("profile missing NodeBinDirs entry: %s", want)
+		}
+	}
+}
+
 func TestGenerateProfile_AuthDirRWPresent(t *testing.T) {
 	got, err := GenerateProfile(baseOpts())
 	if err != nil {
@@ -206,6 +374,43 @@ func TestGenerateProfile_RejectsEmptyHome(t *testing.T) {
 	o.HomeDir = ""
 	if _, err := GenerateProfile(o); err == nil {
 		t.Error("expected error when HomeDir is empty")
+	}
+}
+
+func TestAncestorLiterals(t *testing.T) {
+	cases := []struct {
+		name  string
+		paths []string
+		want  []string
+	}{
+		{"typical macOS HOME only", []string{"/Users/alice"}, []string{"/Users"}},
+		{"home + workspace dedupes /Users", []string{
+			"/Users/alice", "/Users/alice/code/proj",
+		}, []string{"/Users", "/Users/alice", "/Users/alice/code"}},
+		{"workspace outside HOME emits both branches", []string{
+			"/Users/alice", "/data/proj",
+		}, []string{"/Users", "/data"}},
+		{"sandbox-style HOME walks deep", []string{"/private/var/folders/aa/bb/T/h"}, []string{
+			"/private", "/private/var", "/private/var/folders",
+			"/private/var/folders/aa", "/private/var/folders/aa/bb",
+			"/private/var/folders/aa/bb/T",
+		}},
+		{"root and empty are skipped", []string{"/", "", "/Users/alice"}, []string{"/Users"}},
+		{"single segment skipped", []string{"/srv"}, nil},
+		{"trailing slash normalized", []string{"/Users/alice/"}, []string{"/Users"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ancestorLiterals(tc.paths)
+			if len(got) != len(tc.want) {
+				t.Fatalf("ancestorLiterals(%v) = %v, want %v", tc.paths, got, tc.want)
+			}
+			for i := range got {
+				if got[i] != tc.want[i] {
+					t.Errorf("ancestorLiterals(%v)[%d] = %q, want %q", tc.paths, i, got[i], tc.want[i])
+				}
+			}
+		})
 	}
 }
 
@@ -521,10 +726,10 @@ func TestGenerateProfile_RejectsRelativeNodeBinDir(t *testing.T) {
 	_, err := GenerateProfile(ProfileOptions{
 		HomeDir:       "/Users/x",
 		WritablePaths: []string{"/abs/ws"},
-		NodeBinDir:    "node_modules/.bin",
+		NodeBinDirs:   []string{"node_modules/.bin"},
 	})
 	if err == nil || !strings.Contains(err.Error(), "absolute") {
-		t.Fatalf("expected absolute-path error for NodeBinDir, got: %v", err)
+		t.Fatalf("expected absolute-path error for NodeBinDirs, got: %v", err)
 	}
 }
 

@@ -107,6 +107,27 @@ bumps; a CHANGELOG entry will note any breaking change. After v1.0.0,
 breaking changes to the symbols listed under "Stable" above require a
 major-version bump.
 
+## Recent breaking changes (pre-1.0)
+
+- `pkg/sandbox.DetectNodeBinDir` now returns `[]string` and takes two
+  additional parameters: `providerName string` (the canonical CLI name,
+  used to find the wrapper's delegate by searching PATH) and `home string`
+  (the user's HOME directory, used to classify resolved symlink targets
+  as safe). Callers that previously did
+  `NodeBinDir: sandbox.DetectNodeBinDir(bin, logger)` now write
+  `NodeBinDirs: sandbox.DetectNodeBinDir(bin, name, home, logger)`. Pass
+  `""` for either string to disable the corresponding lookup branch.
+- `pkg/sandbox.ProfileOptions.NodeBinDir string` renamed to `NodeBinDirs
+  []string`. Existing struct-literal callers must wrap their value in a
+  slice.
+
+Both changes were made to support real-world installer layouts where the
+provider-binary symlink target lives outside the bin dir's own subtree
+(Anthropic claude, npm Node CLIs, Bun standalones in Homebrew Cellar).
+The previous boundary check rejected nearly every legitimate symlink, then
+fell back to a dirname that didn't include the actual binary, causing the
+wrapped CLI to die at runtime when trying to read its own executable.
+
 ## Audit log
 
 This document was last reconciled against `go doc -all` on 2026-04-27.

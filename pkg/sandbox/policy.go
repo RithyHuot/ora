@@ -138,8 +138,10 @@ func defaultAllowedDomains() []string {
 		"api.anthropic.com",
 		"console.anthropic.com",
 		"statsig.anthropic.com",
+		"mcp-proxy.anthropic.com", // claude-code's MCP relay
 		"api.openai.com",
 		"*.openai.com",
+		"chatgpt.com", // codex's "responses" backend endpoint
 		"generativelanguage.googleapis.com",
 		"*.googleapis.com",
 		"oauth2.googleapis.com",

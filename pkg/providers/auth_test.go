@@ -43,27 +43,28 @@ func TestCodexAuthDirs_DefaultWhenEnvUnset(t *testing.T) {
 	}
 }
 
-func TestOpencodeAuthDirs_IncludesConfigAndDataHome(t *testing.T) {
+func TestOpencodeAuthDirs_IncludesAllXDGRoots(t *testing.T) {
 	got := opencodeAuthDirs("/Users/alice", nil)
-	wantConfig := filepath.Join("/Users/alice", ".config/opencode")
-	wantData := filepath.Join("/Users/alice", ".local/share/opencode")
-	if len(got) != 2 {
-		t.Fatalf("opencodeAuthDirs len=%d, want 2: %+v", len(got), got)
+	want := []string{
+		filepath.Join("/Users/alice", ".config/opencode"),
+		filepath.Join("/Users/alice", ".local/share/opencode"),
+		filepath.Join("/Users/alice", ".local/state/opencode"),
+		filepath.Join("/Users/alice", ".cache/opencode"),
 	}
-	foundConfig, foundData := false, false
+	if len(got) != len(want) {
+		t.Fatalf("opencodeAuthDirs len=%d, want %d: %+v", len(got), len(want), got)
+	}
+	found := map[string]bool{}
 	for _, e := range got {
 		if e.Kind != AuthDirKindDir {
 			t.Errorf("opencode entry %q should be Dir, got %v", e.Path, e.Kind)
 		}
-		if e.Path == wantConfig {
-			foundConfig = true
-		}
-		if e.Path == wantData {
-			foundData = true
-		}
+		found[e.Path] = true
 	}
-	if !foundConfig || !foundData {
-		t.Errorf("opencodeAuthDirs got %+v; missing %s or %s", got, wantConfig, wantData)
+	for _, p := range want {
+		if !found[p] {
+			t.Errorf("opencodeAuthDirs missing %s; got %+v", p, got)
+		}
 	}
 }
 

@@ -250,10 +250,11 @@ Process model (`process-exec`, `process-fork`), `sysctl-read`, `mach-lookup`, `i
 
 - Workspace (`subpath` read+write)
 - Auth dirs (`subpath` or `literal` read+write)
-- System read-only (`/usr/lib`, `/System/Library`, `/usr/bin`, etc.)
+- System read-only (`/usr/lib`, `/usr/share`, `/System/Library`, `/usr/bin`, etc.) — `/usr/share` is required for macOS ICU data (`/usr/share/icu`) loaded lazily by Bun-based CLIs on first use of `Intl.Segmenter`
 - Homebrew roots (existing only)
 - Version manager dirs (existing only)
-- Node binary dir
+- Node binary dirs — both the unresolved provider-binary dirname (so `node` siblings are reachable) and, when the binary is a symlink whose target lives under a safe root (HOME, `/usr`, `/opt/homebrew`, `/opt/local`, `/Applications`), the resolved dirname too. Required for installer layouts where the entry point lives outside the bin dir (Anthropic claude, nvm-installed Node CLIs, Bun standalones in Homebrew Cellar).
+- HOME-and-workspace ancestor `literal` allows — macOS 26 evaluates each component of an `lstat` / `realpath` walk independently, so each ancestor of HomeDir and of the workspace path needs an explicit stat allow between `/` (already granted) and the leaf
 - Temp dirs (`/private/var/folders`, `/tmp`, `/private/tmp`)
 - Device files (`/dev/null`, `/dev/urandom`, etc.)
 - PTY devices (for `script(1)`)

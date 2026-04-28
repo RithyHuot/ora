@@ -40,7 +40,7 @@ func TestProfileCompiles(t *testing.T) {
 			{Path: filepath.Join(home, ".claude"), Kind: providers.AuthDirKindDir},
 			{Path: filepath.Join(home, ".claude.json"), Kind: providers.AuthDirKindFile},
 		},
-		NodeBinDir:     "/usr/bin",
+		NodeBinDirs:    []string{"/usr/bin"},
 		HomebrewRoots:  DetectHomebrewRoots(nil),
 		VersionMgrDirs: DetectVersionMgrDirs(home, nil),
 		Policy: ProfilePolicy{

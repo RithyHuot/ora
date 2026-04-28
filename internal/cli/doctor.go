@@ -234,7 +234,7 @@ func checkProfileCompile() checkResult {
 		AuthDirsRW: []providers.AuthDirEntry{
 			{Path: filepath.Join(home, ".claude"), Kind: providers.AuthDirKindDir},
 		},
-		NodeBinDir:     "/usr/bin",
+		NodeBinDirs:    []string{"/usr/bin"},
 		HomebrewRoots:  sandbox.DetectHomebrewRoots(nil),
 		VersionMgrDirs: sandbox.DetectVersionMgrDirs(home, nil),
 		Policy:         sandbox.ProfilePolicy{},

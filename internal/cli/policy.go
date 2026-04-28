@@ -63,7 +63,7 @@ func runPolicyShow(out io.Writer, provider string) error {
 		HomeDir:          home,
 		WritablePaths:    []string{cwd},
 		AuthDirsRW:       filterExistingAuthDirsForPolicy(authDirs(home, envMap)),
-		NodeBinDir:       "/usr/bin",
+		NodeBinDirs:      []string{"/usr/bin"},
 		HomebrewRoots:    sandbox.DetectHomebrewRoots(nil),
 		VersionMgrDirs:   sandbox.DetectVersionMgrDirs(home, nil),
 		AllowUnixSockets: cfg.AllowUnixSockets,
