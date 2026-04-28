@@ -1,6 +1,7 @@
 package sandbox
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -222,9 +223,9 @@ func isShellScript(path string) bool {
 		return false
 	}
 	defer func() { _ = f.Close() }()
-	var buf [2]byte
-	n, _ := f.Read(buf[:])
-	return n == 2 && buf[0] == '#' && buf[1] == '!'
+	buf := make([]byte, 2)
+	n, _ := f.Read(buf)
+	return n == 2 && bytes.Equal(buf, []byte("#!"))
 }
 
 // findNextPathMatch returns the first executable file named `name` on PATH
