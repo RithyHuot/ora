@@ -113,3 +113,50 @@ func TestProfileCompiles_GitHooksSymlinkToDir(t *testing.T) {
 		t.Fatalf("profile compile failed: %v\n%s", err, out)
 	}
 }
+
+// TestProfileCompiles_StrictMachLookup is the syntax guard for the
+// enumerated mach-lookup allowlist. The (global-name ...) form is
+// distinct from the strict-sysctl (sysctl-name ...) form; getting the
+// keyword wrong silently turns the strict block into a no-op or a
+// compile error. This test forces sandbox-exec to parse the strict
+// variant end to end.
+func TestProfileCompiles_StrictMachLookup(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("sandbox-exec is darwin-only")
+	}
+	if _, err := exec.LookPath("sandbox-exec"); err != nil {
+		t.Skip("sandbox-exec not in PATH")
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmp := t.TempDir()
+
+	profile, err := GenerateProfile(ProfileOptions{
+		HomeDir:       home,
+		WritablePaths: []string{tmp},
+		AuthDirsRW: []providers.AuthDirEntry{
+			{Path: filepath.Join(home, ".claude"), Kind: providers.AuthDirKindDir},
+		},
+		NodeBinDirs:    []string{"/usr/bin"},
+		HomebrewRoots:  DetectHomebrewRoots(nil),
+		VersionMgrDirs: DetectVersionMgrDirs(home, nil),
+		Policy:         ProfilePolicy{StrictMachLookup: true},
+	})
+	if err != nil {
+		t.Fatalf("GenerateProfile: %v", err)
+	}
+
+	profilePath := filepath.Join(tmp, "ora-test-strict-mach.sb")
+	if err := os.WriteFile(profilePath, []byte(profile), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := exec.Command("sandbox-exec", "-f", profilePath, "/usr/bin/true")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("strict-mach-lookup profile failed to compile (exit=%v):\n--- profile ---\n%s\n--- stderr ---\n%s",
+			err, profile, out)
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -73,6 +74,7 @@ func runPolicyShow(out io.Writer, provider string) error {
 			AllowWorkspaceGitConfig: cfg.AllowWorkspaceGitConfig,
 			AllowSysVShm:            cfg.AllowSysVShm,
 			StrictSysctl:            cfg.StrictSysctl,
+			StrictMachLookup:        cfg.StrictMachLookup,
 		},
 	})
 	if err != nil {
@@ -86,6 +88,25 @@ func runPolicyShow(out io.Writer, provider string) error {
 	all := append(append([]string{}, sandbox.DefaultPolicy().AllowedDomains...), cfg.ExtraDomains...)
 	for _, d := range all {
 		dw.println(d)
+	}
+	// Per-provider extensions are unioned with the above at runtime when the
+	// matching provider is invoked. Surface them here so the printed policy
+	// matches what `ora <provider>` would actually allow.
+	var providerLines []string
+	for _, name := range providers.Names() {
+		spec, _ := providers.Lookup(name)
+		if len(spec.AllowedDomains) == 0 {
+			continue
+		}
+		providerLines = append(providerLines,
+			fmt.Sprintf("; %s: %s", name, strings.Join(spec.AllowedDomains, ", ")))
+	}
+	if len(providerLines) > 0 {
+		dw.println("")
+		dw.println("; ===== PER-PROVIDER ALLOWED DOMAINS =====")
+		for _, ln := range providerLines {
+			dw.println(ln)
+		}
 	}
 	return dw.err
 }

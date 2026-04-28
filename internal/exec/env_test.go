@@ -410,3 +410,50 @@ func TestBuildSpawnEnv_OpencodeKeepsAllOwnedCredentials(t *testing.T) {
 		}
 	}
 }
+
+func TestApplyEnvDefaults_AppliesWhenAbsent(t *testing.T) {
+	env := []string{"PATH=/usr/bin", "USER=alice"}
+	got := ApplyEnvDefaults(env, map[string]string{"DISABLE_TELEMETRY": "1"})
+	if !slices.Contains(got, "DISABLE_TELEMETRY=1") {
+		t.Errorf("ApplyEnvDefaults did not append default; got: %v", got)
+	}
+}
+
+func TestApplyEnvDefaults_UserValueWins(t *testing.T) {
+	env := []string{"PATH=/usr/bin", "DISABLE_TELEMETRY=0"}
+	got := ApplyEnvDefaults(env, map[string]string{"DISABLE_TELEMETRY": "1"})
+	// User's DISABLE_TELEMETRY=0 must be preserved; ora's DISABLE_TELEMETRY=1
+	// must not be appended (which would make the var ambiguous to the child).
+	count := 0
+	for _, kv := range got {
+		if strings.HasPrefix(kv, "DISABLE_TELEMETRY=") {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("expected exactly one DISABLE_TELEMETRY entry, got %d: %v", count, got)
+	}
+	if !slices.Contains(got, "DISABLE_TELEMETRY=0") {
+		t.Errorf("user's DISABLE_TELEMETRY=0 was overwritten by ora default; got: %v", got)
+	}
+}
+
+func TestApplyEnvDefaults_NilDefaults(t *testing.T) {
+	env := []string{"PATH=/usr/bin"}
+	got := ApplyEnvDefaults(env, nil)
+	if len(got) != len(env) {
+		t.Errorf("nil defaults must not modify env; got %d entries, want %d", len(got), len(env))
+	}
+}
+
+func TestApplyEnvDefaults_DeterministicOrder(t *testing.T) {
+	env := []string{"PATH=/usr/bin"}
+	defaults := map[string]string{"Z_VAR": "z", "A_VAR": "a", "M_VAR": "m"}
+	got := ApplyEnvDefaults(env, defaults)
+	// Defaults should be appended in sorted key order so test golden files
+	// and snapshot diffs stay stable.
+	want := []string{"PATH=/usr/bin", "A_VAR=a", "M_VAR=m", "Z_VAR=z"}
+	if !slices.Equal(got, want) {
+		t.Errorf("ApplyEnvDefaults order:\n got: %v\nwant: %v", got, want)
+	}
+}

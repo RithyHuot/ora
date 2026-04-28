@@ -171,6 +171,7 @@ func (r *Runner) buildAndWriteProfile(sess *session.Session, home string, writab
 			AllowWorkspaceGitConfig: r.Config.AllowWorkspaceGitConfig,
 			AllowSysVShm:            r.Config.AllowSysVShm,
 			StrictSysctl:            r.Config.StrictSysctl,
+			StrictMachLookup:        r.Config.StrictMachLookup,
 		},
 	})
 	if err != nil {

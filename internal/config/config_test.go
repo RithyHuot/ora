@@ -201,6 +201,24 @@ func TestLoadEnv_ParsesBoolsAndDomains(t *testing.T) {
 	}
 }
 
+func TestLoadEnv_StrictMachLookup(t *testing.T) {
+	// Default: env unset → field stays at the Defaults() zero value.
+	cfg := LoadEnv()
+	if cfg.StrictMachLookup {
+		t.Error("StrictMachLookup must default to false when env unset")
+	}
+	t.Setenv("ORA_STRICT_MACH_LOOKUP", "1")
+	cfg = LoadEnv()
+	if !cfg.StrictMachLookup {
+		t.Error("ORA_STRICT_MACH_LOOKUP=1 should set StrictMachLookup=true")
+	}
+	t.Setenv("ORA_STRICT_MACH_LOOKUP", "off")
+	cfg = LoadEnv()
+	if cfg.StrictMachLookup {
+		t.Error("ORA_STRICT_MACH_LOOKUP=off should set StrictMachLookup=false")
+	}
+}
+
 func TestParseCommaList_MergesAndTrims(t *testing.T) {
 	got := parseCommaList(" foo.com ,*.bar.com,, ")
 	if len(got) != 2 || got[0] != "foo.com" || got[1] != "*.bar.com" {
@@ -505,6 +523,42 @@ strict_sysctl = true
 	}
 	if !c.StrictSysctl {
 		t.Error("expected StrictSysctl=true")
+	}
+}
+
+func TestParseBytes_StrictMachLookupRoundTrip(t *testing.T) {
+	// Default — key absent — leaves the field zero so Defaults()/Merge()
+	// don't get unexpectedly flipped on by a parse pass.
+	c, err := ParseBytes("test.toml", []byte(`[paths]`+"\n"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if c.StrictMachLookup {
+		t.Error("StrictMachLookup must default to false when key absent")
+	}
+
+	c, err = ParseBytes("test.toml", []byte(`
+[paths]
+strict_mach_lookup = true
+`))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !c.StrictMachLookup {
+		t.Error("expected StrictMachLookup=true")
+	}
+
+	// Explicit false is accepted (additive Merge can encode it because the
+	// default is false; nothing to disable). Verifies no spurious rejection.
+	c, err = ParseBytes("test.toml", []byte(`
+[paths]
+strict_mach_lookup = false
+`))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if c.StrictMachLookup {
+		t.Error("expected StrictMachLookup=false")
 	}
 }
 

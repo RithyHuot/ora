@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+
+	"github.com/rithyhuot/ora/pkg/proxy"
 )
 
 // ProviderSpec describes one supported AI coding CLI. Everything
@@ -28,6 +30,26 @@ type ProviderSpec struct {
 	// confirm the egress proxy permits this provider's traffic. Empty for
 	// local-only providers (e.g. ollama).
 	ProbeHost string
+
+	// AllowedDomains is the per-provider extension to the global egress
+	// allowlist. Some CLIs require domains beyond the cross-provider defaults
+	// (e.g. opencode dials its catalog at models.dev) — listing them here
+	// keeps the global default list narrow and lets each provider declare
+	// what it actually needs. Entries follow the same syntax as
+	// proxy.ValidateAllowedDomain (literal, *.suffix wildcard, ASCII Punycode
+	// only). The orchestrator unions this with sandbox.DefaultPolicy().
+	// AllowedDomains, user ExtraDomains, and CLI --allow flags before passing
+	// to the proxy. Out-of-tree providers' AllowedDomains are validated at
+	// Register() time.
+	AllowedDomains []string
+
+	// EnvDefaults is the set of KEY=VAL pairs applied to the wrapped CLI's
+	// environment when the user has not set the key themselves. Use it to
+	// nudge a CLI into sandbox-friendly behavior — for example, setting
+	// DISABLE_TELEMETRY=1 for claude so its synchronous Datadog telemetry
+	// flush does not hang on the egress proxy's deny of a non-allowlisted
+	// intake host. User-set values (inherited from parent env) always win.
+	EnvDefaults map[string]string
 
 	// builtin marks providers shipped in this package. Register() refuses to
 	// overwrite a builtin so out-of-tree code cannot weaken OwnEnvKeys for
@@ -64,7 +86,21 @@ var (
 				"CLAUDE_CODE_SUBAGENT_MODEL",
 			},
 			ProbeHost: "api.anthropic.com",
-			builtin:   true,
+			// claude.ai subdomains: downloads.claude.ai is the CDN the
+			// CLI fetches resources from (binary updates, session assets);
+			// future versions may add status.* or other ops endpoints.
+			// Single-registrable-domain wildcard, owned by Anthropic —
+			// same shape as the global default's *.openai.com.
+			AllowedDomains: []string{"*.claude.ai"},
+			// Claude's synchronous Datadog telemetry flush blocks the
+			// foreground request when the egress proxy denies the
+			// non-allowlisted intake host (http-intake.logs.<region>.
+			// datadoghq.com), so the user sees `ora claude` hang for
+			// seconds on every prompt. Disable telemetry by default —
+			// users who want it on can `unset DISABLE_TELEMETRY` or
+			// `--allow http-intake.logs.us5.datadoghq.com`.
+			EnvDefaults: map[string]string{"DISABLE_TELEMETRY": "1"},
+			builtin:     true,
 		},
 		"gemini": {
 			Name:         "gemini",
@@ -82,7 +118,14 @@ var (
 			LoginCommand: "codex login",
 			OwnEnvKeys:   []string{"OPENAI_API_KEY"},
 			ProbeHost:    "api.openai.com",
-			builtin:      true,
+			// codex hits chatgpt.com subdomains for its responses-API
+			// backend (the global default already has the apex
+			// chatgpt.com), session telemetry/experimentation
+			// (ab.chatgpt.com), and likely more in future versions.
+			// Single-registrable-domain wildcard owned by OpenAI; mirrors
+			// the global default's *.openai.com.
+			AllowedDomains: []string{"*.chatgpt.com"},
+			builtin:        true,
 			KnownIssues: []string{
 				"openai/codex#4242: HTTPS_PROXY not honored by login + Ollama subroutines in some versions",
 				"Set CODEX_CA_CERTIFICATE if behind a corporate TLS proxy",
@@ -100,7 +143,15 @@ var (
 				"OLLAMA_HOST",
 			},
 			ProbeHost: "api.openai.com",
-			builtin:   true,
+			// opencode-specific egress targets:
+			//   - models.dev: hosted model catalog opencode fetches at
+			//     bootstrap before any provider call.
+			//   - opencode.ai (apex + subdomains): opencode's own domain
+			//     used for plugin / session resources during interactive
+			//     sessions. Without it the TUI launches but interaction
+			//     fails with "Forbidden: ora egress: host not allowlisted".
+			AllowedDomains: []string{"models.dev", "opencode.ai", "*.opencode.ai"},
+			builtin:        true,
 			KnownIssues: []string{
 				"anomalyco/opencode#6953: ignores HTTPS_PROXY in some versions",
 				"anomalyco/opencode#7155: crash on launch with http_proxy set in some versions",
@@ -116,6 +167,24 @@ var (
 		},
 	}
 )
+
+// init validates every builtin's AllowedDomains at package load time.
+// Builtins are added directly to the registry map and bypass Register's
+// validation; without this fail-closed check, a typo or overly-broad
+// wildcard in a builtin entry would ship to users undetected (the
+// existing TestBuiltinProviders_AllowedDomainsCanonical guards drift
+// only when tests run, not on every binary). Panicking here matches
+// ora's fail-closed posture for sandbox / egress invariants.
+func init() {
+	for name, spec := range registry {
+		if len(spec.AllowedDomains) == 0 {
+			continue
+		}
+		if _, err := proxy.ValidateAllowedDomains(spec.AllowedDomains); err != nil {
+			panic(fmt.Sprintf("providers: builtin %q has invalid AllowedDomains: %v", name, err))
+		}
+	}
+}
 
 // Lookup returns the spec for the named provider. The bool reports whether
 // the provider is registered. Safe for concurrent use.
@@ -143,6 +212,15 @@ func Register(spec ProviderSpec) error {
 	}
 	if len(spec.BinNames) == 0 {
 		spec.BinNames = []string{spec.Name}
+	}
+	// Canonicalize and reject overly-broad / malformed AllowedDomains so a
+	// misconfigured out-of-tree spec cannot silently widen egress.
+	if len(spec.AllowedDomains) > 0 {
+		canon, err := proxy.ValidateAllowedDomains(spec.AllowedDomains)
+		if err != nil {
+			return fmt.Errorf("providers.Register: %s.AllowedDomains: %w", spec.Name, err)
+		}
+		spec.AllowedDomains = canon
 	}
 	spec.builtin = false
 

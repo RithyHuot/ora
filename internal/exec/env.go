@@ -2,6 +2,7 @@ package exec
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -152,6 +153,45 @@ func BuildSpawnEnv(parent []string, proxyPort int, allOwnedKeys, keepKeys []stri
 		fmt.Sprintf("CLOUDSDK_PROXY_PORT=%d", proxyPort),
 	)
 	return out
+}
+
+// ApplyEnvDefaults appends KEY=VAL pairs from defaults to env for any key
+// that is not already present. User-set values (inherited from parent env)
+// always win over provider defaults.
+//
+// Call order matters: the orchestrator invokes ApplyEnvDefaults on the
+// PARENT env (os.Environ()) BEFORE handing the result to BuildSpawnEnv.
+// Doing it the other way round would let a provider's EnvDefaults entry
+// re-introduce keys that alwaysStripKeys deliberately removed (NODE_OPTIONS,
+// DYLD_INSERT_LIBRARIES, BASH_ENV, PYTHONSTARTUP, …) — bypassing the
+// loader-hook defense. Merging defaults into the parent env first means
+// they go through the same strip pass as inherited env. The canonical use
+// case is `DISABLE_TELEMETRY=1` for claude — claude's telemetry to Datadog
+// hangs the foreground request when the egress proxy denies the
+// (non-allowlisted) intake host, so we disable it by default unless the
+// user has explicitly set DISABLE_TELEMETRY themselves.
+func ApplyEnvDefaults(env []string, defaults map[string]string) []string {
+	if len(defaults) == 0 {
+		return env
+	}
+	seen := make(map[string]struct{}, len(env))
+	for _, kv := range env {
+		if k, _, ok := strings.Cut(kv, "="); ok {
+			seen[k] = struct{}{}
+		}
+	}
+	keys := make([]string, 0, len(defaults))
+	for k := range defaults {
+		if _, has := seen[k]; has {
+			continue
+		}
+		keys = append(keys, k)
+	}
+	sort.Strings(keys) // deterministic for tests
+	for _, k := range keys {
+		env = append(env, k+"="+defaults[k])
+	}
+	return env
 }
 
 func isProxyKey(k string) bool {

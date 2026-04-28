@@ -97,7 +97,11 @@ func (r *Runner) Run(ctx context.Context) RunResult {
 	defer sess.Cleanup() //nolint:errcheck // cleanup errors are logged via OnCleanup hooks
 
 	policy := sandbox.DefaultPolicy()
-	allowedDomains := append(append([]string{}, policy.AllowedDomains...), r.Config.ExtraDomains...)
+	allowedDomains := append([]string{}, policy.AllowedDomains...)
+	if spec, ok := providers.Lookup(r.ProviderName); ok && len(spec.AllowedDomains) > 0 {
+		allowedDomains = append(allowedDomains, spec.AllowedDomains...)
+	}
+	allowedDomains = append(allowedDomains, r.Config.ExtraDomains...)
 	allowedDomains = append(allowedDomains, rt.AdHocAllowedDomains...)
 	prx, port, err := r.startEgressProxy(ctx, sess, allowedDomains)
 	if err != nil {
@@ -113,11 +117,26 @@ func (r *Runner) Run(ctx context.Context) RunResult {
 	}
 
 	allOwned := providers.AllOwnedEnvKeys()
-	var keepKeys []string
+	var (
+		keepKeys    []string
+		envDefaults map[string]string
+	)
 	if spec, ok := providers.Lookup(r.ProviderName); ok {
 		keepKeys = spec.OwnEnvKeys
+		envDefaults = spec.EnvDefaults
 	}
-	env := xexec.BuildSpawnEnv(os.Environ(), port, allOwned, keepKeys)
+	// Apply provider EnvDefaults to the PARENT env first, then run
+	// BuildSpawnEnv on the merged result. This matters for security:
+	// applying defaults AFTER BuildSpawnEnv would let a (hostile or
+	// misconfigured) provider re-introduce keys that alwaysStripKeys
+	// deliberately removed — NODE_OPTIONS, DYLD_INSERT_LIBRARIES,
+	// BASH_ENV, PYTHONSTARTUP, etc. Merging first means those keys go
+	// through the same strip pass as inherited parent env, so an
+	// EnvDefaults["NODE_OPTIONS"] = "..." cannot bypass loader-hook
+	// stripping. ApplyEnvDefaults preserves the "user value wins"
+	// semantic by skipping keys already present in the input.
+	parentEnv := xexec.ApplyEnvDefaults(os.Environ(), envDefaults)
+	env := xexec.BuildSpawnEnv(parentEnv, port, allOwned, keepKeys)
 	wrapBin, wrapArgs := backend.Wrap(sess.ProfilePath(), r.Bin, r.Args)
 
 	stopMonitor := r.startLogMonitorIfVerbose(ctx, rt.Verbose)

@@ -7,6 +7,99 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `pkg/sandbox.ProfilePolicy.StrictMachLookup bool` (TOML
+  `strict_mach_lookup`, env `ORA_STRICT_MACH_LOOKUP`) — opt-in toggle
+  that replaces the blanket `(allow mach-lookup)` with an enumerated
+  XPC service allowlist. Closes the gap where a sandboxed agent could
+  reach 1Password / GUI password-manager XPC daemons (those service
+  names are not on the allowlist, so strict mode blocks them) and any
+  other XPC service outside the empirically-validated baseline. Note:
+  Keychain access via `com.apple.securityd.xpc` is intentionally kept
+  on the allowlist because claude's OAuth flow (and any provider using
+  `SecItem*`) requires it — strict mode does NOT block Keychain.
+  Filesystem denies for `~/.aws`, `~/.config/op`, etc. continue to
+  apply to direct file access in both modes; strict mode adds
+  XPC-fallback denial on top. Off by default: the strict allowlist is
+  the Anthropic-validated baseline for Bun-based CLIs but has not yet
+  been empirically profiled against every wrapped provider, and we
+  don't want to break existing flows that rely on services not on the
+  list. `ora doctor` now points at the toggle in its known-gaps note.
+- `pkg/providers.ProviderSpec.AllowedDomains []string` — per-provider
+  extension to the global egress allowlist. Some CLIs require domains
+  beyond the cross-provider defaults (e.g. opencode dials its catalog at
+  `models.dev` before any model call). Listing them here keeps the
+  global default list narrow and lets each provider declare what it
+  actually needs. Entries are validated through
+  `proxy.ValidateAllowedDomain` at `Register()` time. The orchestrator
+  unions this with `sandbox.DefaultPolicy().AllowedDomains`, user
+  `ExtraDomains`, and CLI `--allow` flags before passing to the proxy.
+- `pkg/providers.ProviderSpec.EnvDefaults map[string]string` — KEY=VAL
+  pairs applied to the wrapped CLI's environment when the user has not
+  set the key themselves. Used to nudge a CLI into sandbox-friendly
+  behavior without overriding explicit user choices.
+- Per-provider `AllowedDomains` populated:
+  - opencode: `models.dev` (catalog bootstrap), `opencode.ai`,
+    `*.opencode.ai` (plugin / session resources during interactive use)
+  - claude: `*.claude.ai` (downloads.claude.ai CDN; future ops
+    subdomains)
+  - codex: `*.chatgpt.com` (responses-API backend, ab.chatgpt.com
+    telemetry/experimentation; the apex `chatgpt.com` was already in the
+    global default but subdomains were not)
+- `DISABLE_TELEMETRY=1` is now in claude's `EnvDefaults` (see Changed
+  below).
+
+### Changed
+
+- Claude's synchronous Datadog telemetry is disabled by default. Recent
+  claude versions hard-block the foreground request on a telemetry flush
+  to `http-intake.logs.<region>.datadoghq.com` — when the egress proxy
+  denies the (non-allowlisted) intake host, every prompt hangs for
+  seconds before responding. `ora claude` now sets `DISABLE_TELEMETRY=1`
+  unless the user has set the variable themselves, matching Anthropic's
+  upstream `sandbox-runtime` posture of keeping telemetry off the
+  default allowlist. Users who want telemetry on can either `unset
+  DISABLE_TELEMETRY` in their shell or pass `--allow
+  http-intake.logs.us5.datadoghq.com` (or the appropriate regional
+  intake host).
+- `ora policy show` now appends a `; ===== PER-PROVIDER ALLOWED DOMAINS
+  =====` block listing each provider's `AllowedDomains` extension so
+  users can see what `ora <provider>` would actually allow at runtime.
+- `ora doctor --probe` now includes the invoked provider's
+  `AllowedDomains` in the egress allowlist when probing, matching the
+  runtime path.
+
+### Fixed
+
+- gemini-cli aborted at startup with `An unexpected critical error
+  occurred:Error: setRawMode EPERM` and never displayed a prompt. The
+  same root cause showed up as `Error: Operation not permitted (os
+  error 1)` for `ora codex` (interactive mode). Both CLIs call
+  `tcsetattr()` on their stdin TTY at startup to enter raw mode, which
+  Seatbelt classifies as `file-ioctl` — distinct from the
+  `file-read*`/`file-write*` operations the profile already granted on
+  `/dev/tty` and `/dev/ttysN`. The profile now emits explicit
+  `(allow file-ioctl ...)` rules for `/dev/tty`, `/dev/ptmx`,
+  `/dev/ttys[0-9]+`, and `/dev/pts/[0-9]+`, plus `(allow pseudo-tty)`
+  for children that allocate their own PTY pair. Modeled on Anthropic's
+  `sandbox-runtime` (`anthropic-experimental/sandbox-runtime`) PTY
+  block. A new `//go:build darwin && integration` test
+  (`pkg/sandbox/profile_pty_integration_test.go`) spawns `script(1)`
+  under a freshly-generated profile and asserts the typescript writes
+  successfully, catching the regression at the kernel level.
+- `ora opencode` hung on every invocation, then died with `egress.deny
+  host=models.dev port=443 reason=not_allowlisted`. opencode bootstraps
+  from its hosted model catalog at `models.dev` before any provider
+  call; the global default allowlist did not include it because it's
+  opencode-specific. Fixed by populating opencode's `AllowedDomains`
+  with `models.dev` (see Added).
+- `ora claude` hung 5–15 seconds on every prompt before producing
+  output, accompanied by `egress.deny
+  host=http-intake.logs.us5.datadoghq.com port=443
+  reason=not_allowlisted`. Fixed by disabling claude telemetry by
+  default (see Changed).
+
 ## [0.2.3] - 2026-04-28
 
 ### Fixed

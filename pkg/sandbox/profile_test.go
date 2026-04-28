@@ -348,11 +348,22 @@ func TestGenerateProfile_PTYRulesPresent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Three classes of PTY/TTY grant must all appear: open r/w, ioctl
+	// (tcsetattr — Node setRawMode), and pseudo-tty (posix_openpt for
+	// children that allocate their own PTY).
 	for _, want := range []string{
-		`(literal "/dev/ptmx")`,
-		`(literal "/dev/tty")`,
-		`(regex #"^/dev/ttys[0-9]+$")`,
-		`(regex #"^/dev/pts/[0-9]+$")`,
+		// Open + read/write
+		`(allow file-read* file-write* (literal "/dev/ptmx"))`,
+		`(allow file-read* file-write* (literal "/dev/tty"))`,
+		`(allow file-read* file-write* (regex #"^/dev/ttys[0-9]+$"))`,
+		`(allow file-read* file-write* (regex #"^/dev/pts/[0-9]+$"))`,
+		// ioctl — without these, gemini-cli setRawMode dies with EPERM
+		`(allow file-ioctl (literal "/dev/ptmx"))`,
+		`(allow file-ioctl (literal "/dev/tty"))`,
+		`(allow file-ioctl (regex #"^/dev/ttys[0-9]+$"))`,
+		`(allow file-ioctl (regex #"^/dev/pts/[0-9]+$"))`,
+		// posix_openpt and friends
+		`(allow pseudo-tty)`,
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("profile missing PTY rule %q", want)
@@ -660,6 +671,45 @@ func TestGenerateProfile_DefaultSysctlIsBlanket(t *testing.T) {
 	}
 	if !strings.Contains(got, `(allow sysctl-read)`) {
 		t.Error("default (StrictSysctl=false) should emit blanket sysctl-read")
+	}
+}
+
+func TestGenerateProfile_DefaultMachLookupIsBlanket(t *testing.T) {
+	got, err := GenerateProfile(baseOpts())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "(allow mach-lookup)\n") {
+		t.Error("default (StrictMachLookup=false) should emit bare (allow mach-lookup)")
+	}
+	if strings.Contains(got, "(global-name") {
+		t.Error("default (StrictMachLookup=false) must not emit any (global-name ...) clauses")
+	}
+}
+
+func TestGenerateProfile_StrictMachLookupAllowlist(t *testing.T) {
+	o := baseOpts()
+	o.Policy.StrictMachLookup = true
+	got, err := GenerateProfile(o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The bare unrestricted form must be gone — strict mode replaces it.
+	if strings.Contains(got, "(allow mach-lookup)\n") {
+		t.Error("StrictMachLookup=true must NOT emit bare (allow mach-lookup)")
+	}
+	// Spot-check a few services from the Anthropic baseline plus the
+	// SecurityServer entry that filesystem denies otherwise can't protect.
+	for _, name := range []string{
+		"com.apple.securityd.xpc",
+		"com.apple.SecurityServer",
+		"com.apple.system.opendirectoryd.libinfo",
+		"com.apple.coreservices.launchservicesd",
+	} {
+		needle := `(global-name "` + name + `")`
+		if !strings.Contains(got, needle) {
+			t.Errorf("StrictMachLookup=true profile missing %s", needle)
+		}
 	}
 }
 

@@ -32,11 +32,21 @@ type Config struct {
 	// that read kern.proc.* (debuggers, some IDE integrations) opt out via
 	// ORA_STRICT_SYSCTL=0. The TOML form rejects strict_sysctl=false because
 	// the additive Merge cannot encode "explicit false"; use the env var.
-	StrictSysctl  bool
-	AllowSysVShm  bool     // opt-in (allow ipc-sysv-shm); needed by Postgres initdb, etc.
-	ExtraDomains  []string // additive on top of sandbox.DefaultPolicy().AllowedDomains
-	ExtraWritable []string // additional absolute paths to mark R/W
-	WorkDir       string   // overrides cwd→repo-root resolution
+	StrictSysctl bool
+	// StrictMachLookup, when true, replaces the blanket (allow mach-lookup)
+	// with an enumerated XPC service allowlist that excludes Keychain
+	// (com.apple.securityd) and the 1Password XPC daemons — closing the
+	// filesystem-deny bypass where the wrapped CLI can talk to those
+	// services directly even though ~/.config/op and ~/.aws are denied.
+	// Default false: tightening mach-lookup is empirically risky per
+	// provider, so opt-in lets users adopt incrementally without breaking
+	// existing flows. Toggled via ORA_STRICT_MACH_LOOKUP=1 or
+	// strict_mach_lookup = true in TOML.
+	StrictMachLookup bool
+	AllowSysVShm     bool     // opt-in (allow ipc-sysv-shm); needed by Postgres initdb, etc.
+	ExtraDomains     []string // additive on top of sandbox.DefaultPolicy().AllowedDomains
+	ExtraWritable    []string // additional absolute paths to mark R/W
+	WorkDir          string   // overrides cwd→repo-root resolution
 	// WorkDirScope controls how the workspace's writable root is computed when
 	// `WorkDir` (explicit override) is empty. Values:
 	//   "cwd"      — use the current working directory only (DEFAULT, narrowest scope)
@@ -96,6 +106,13 @@ func LoadEnv() Config {
 	if v := os.Getenv("ORA_STRICT_SYSCTL"); v != "" {
 		if b, ok := parseBool(v); ok {
 			c.StrictSysctl = b
+		}
+	}
+	// ORA_STRICT_MACH_LOOKUP is the env opt-in for the enumerated mach-lookup
+	// allowlist. Off by default — see Config.StrictMachLookup for rationale.
+	if v := os.Getenv("ORA_STRICT_MACH_LOOKUP"); v != "" {
+		if b, ok := parseBool(v); ok {
+			c.StrictMachLookup = b
 		}
 	}
 	return c

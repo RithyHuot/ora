@@ -26,6 +26,17 @@ type ProfilePolicy struct {
 	AllowWorkspaceGitConfig bool // default false; opt-in. When false, $WS/.git/config is denied for read+write.
 	AllowSysVShm            bool // default false; opt-in. Allow ipc-sysv-shm (needed by Postgres initdb, etc.)
 	StrictSysctl            bool // default false; when true, block kern.proc.* enumeration
+	// StrictMachLookup, when true, replaces the blanket (allow mach-lookup)
+	// with an enumerated allowlist of XPC/Mach service names — closing the
+	// known gap where the wrapped agent could reach com.apple.securityd
+	// (Keychain SecItemCopyMatching) and 1Password / GUI password-manager
+	// XPC daemons that bypass our filesystem denies on ~/.config/op,
+	// ~/.aws, etc. Defaults off (zero value) because the strict allowlist
+	// has not been empirically validated against every wrapped CLI; opt-in
+	// adoption avoids breaking flows that rely on services not yet on the
+	// list. Toggled via ORA_STRICT_MACH_LOOKUP=1 or strict_mach_lookup =
+	// true in TOML.
+	StrictMachLookup bool
 }
 
 // ProfileOptions is the pure-function input to GenerateProfile. All paths
@@ -196,16 +207,55 @@ func emitCapabilityGrants(b *strings.Builder, o ProfileOptions) {
 	} else {
 		line("(allow sysctl-read)")
 	}
-	// Known limitation: unrestricted mach-lookup. This permits the sandboxed
-	// agent to reach Mach services that bypass our filesystem denies — most
-	// notably com.apple.securityd (Keychain SecItemCopyMatching) and the
-	// 1Password / GUI password-manager XPC daemons. The filesystem denies on
-	// ~/.config/op, ~/.aws, etc. do nothing if the agent talks to the daemon
-	// directly. Tightening to an enumerated allowlist requires per-provider
-	// empirical profiling of which services each CLI legitimately needs
-	// (notification-center, distnoted, runtime warnings, ...). See
-	// `ora doctor` for the runtime warning.
-	line("(allow mach-lookup)")
+	if o.Policy.StrictMachLookup {
+		// Strict mode: enumerated XPC/Mach service allowlist. Closes the
+		// "agent can reach 1Password / arbitrary password-manager XPC
+		// daemons" gap (those service names — e.g.
+		// 2BUA8C4S2C.com.1password.1password-helper — are NOT on this list,
+		// so strict mode blocks them). It does NOT block Keychain access:
+		// com.apple.securityd.xpc remains on the allowlist because claude's
+		// OAuth flow (and any provider authenticating via SecItemAdd /
+		// SecItemCopyMatching) needs it. Filesystem denies for ~/.aws,
+		// ~/.config/op, etc. still apply to direct file access — strict
+		// mode tightens the XPC fallback path. The list is the baseline
+		// Anthropic empirically validated for Bun-based CLIs in
+		// anthropic-experimental/sandbox-runtime — known-good for claude.
+		// Off by default (see ProfilePolicy.StrictMachLookup) because other
+		// providers have not yet been profiled against this list.
+		line("; mach-lookup — strict mode (enumerated XPC services)")
+		line("(allow mach-lookup")
+		for _, name := range []string{
+			"com.apple.audio.systemsoundserver",
+			"com.apple.distributed_notifications@Uv3",
+			"com.apple.FontObjectsServer",
+			"com.apple.fonts",
+			"com.apple.logd",
+			"com.apple.lsd.mapdb",
+			"com.apple.PowerManagement.control",
+			"com.apple.system.logger",
+			"com.apple.system.notification_center",
+			"com.apple.system.opendirectoryd.libinfo",
+			"com.apple.system.opendirectoryd.membership",
+			"com.apple.bsd.dirhelper",
+			"com.apple.securityd.xpc",
+			"com.apple.coreservices.launchservicesd",
+			"com.apple.SecurityServer",
+		} {
+			line(fmt.Sprintf(`  (global-name "%s")`, name))
+		}
+		line(")")
+	} else {
+		// Known limitation: unrestricted mach-lookup. This permits the sandboxed
+		// agent to reach Mach services that bypass our filesystem denies — most
+		// notably com.apple.securityd (Keychain SecItemCopyMatching) and the
+		// 1Password / GUI password-manager XPC daemons. The filesystem denies on
+		// ~/.config/op, ~/.aws, etc. do nothing if the agent talks to the daemon
+		// directly. Opt in to ProfilePolicy.StrictMachLookup (TOML
+		// strict_mach_lookup or ORA_STRICT_MACH_LOOKUP=1) for the enumerated
+		// allowlist; left off by default while per-provider compatibility is
+		// still being validated. See `ora doctor` for the runtime warning.
+		line("(allow mach-lookup)")
+	}
 	line("(allow ipc-posix-shm)")
 	if o.Policy.AllowSysVShm {
 		line("(allow ipc-sysv-shm)")
@@ -327,11 +377,24 @@ func emitPathAllows(b *strings.Builder, o ProfileOptions) error {
 	line(`(allow file-read* (literal "/dev/urandom"))`)
 	line(`(allow file-read* (literal "/dev/zero"))`)
 	line("")
-	line("; PTY for `script(1)` interactive wrap")
+	line("; PTY for interactive wrap. Three operation classes are needed:")
+	line(";   1. file-read*/file-write*  — open + read/write the slave/master")
+	line(";   2. file-ioctl              — tcsetattr/TIOCS* (Node setRawMode,")
+	line(";                                 stty, anything that calls termios)")
+	line(";   3. pseudo-tty              — posix_openpt/grantpt/unlockpt for")
+	line(";                                 children that allocate their own PTY")
+	line("; Without (2), gemini-cli (and any Node CLI using ReadStream.setRawMode)")
+	line("; aborts at startup with EPERM — the syscall is tcsetattr on the slave")
+	line("; fd, which Seatbelt classifies as file-ioctl, NOT file-write.")
+	line(`(allow pseudo-tty)`)
 	line(`(allow file-read* file-write* (literal "/dev/ptmx"))`)
 	line(`(allow file-read* file-write* (literal "/dev/tty"))`)
 	line(`(allow file-read* file-write* (regex #"^/dev/ttys[0-9]+$"))`)
 	line(`(allow file-read* file-write* (regex #"^/dev/pts/[0-9]+$"))`)
+	line(`(allow file-ioctl (literal "/dev/ptmx"))`)
+	line(`(allow file-ioctl (literal "/dev/tty"))`)
+	line(`(allow file-ioctl (regex #"^/dev/ttys[0-9]+$"))`)
+	line(`(allow file-ioctl (regex #"^/dev/pts/[0-9]+$"))`)
 	line("")
 	line("; Temp dirs")
 	for _, p := range []string{"/private/var/folders", "/tmp", "/private/tmp"} {

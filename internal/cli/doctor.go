@@ -123,6 +123,7 @@ func runDoctor(out io.Writer, sweep, probe bool) error {
 		if probe && spec.ProbeHost != "" {
 			host := spec.ProbeHost
 			allowed := append([]string{host}, sandbox.DefaultPolicy().AllowedDomains...)
+			allowed = append(allowed, spec.AllowedDomains...)
 			if probeErr := probeProviderThroughEgress(host, allowed); probeErr != nil {
 				dw.printf("      probe: FAIL (%v)\n", probeErr)
 			} else {
@@ -133,10 +134,12 @@ func runDoctor(out io.Writer, sweep, probe bool) error {
 
 	dw.println("")
 	dw.println("known gaps:")
-	dw.println("  - sandbox profile emits unrestricted (allow mach-lookup); the wrapped")
-	dw.println("    agent can reach Mach/XPC services (Keychain, 1Password CLI/GUI)")
-	dw.println("    that bypass filesystem denies. A per-provider empirically-derived")
-	dw.println("    service allowlist is tracked for a future release.")
+	dw.println("  - by default the sandbox profile emits unrestricted (allow mach-lookup);")
+	dw.println("    the wrapped agent can reach Mach/XPC services (Keychain, 1Password")
+	dw.println("    CLI/GUI) that bypass filesystem denies. Opt in to the enumerated")
+	dw.println("    XPC allowlist with `strict_mach_lookup = true` in ~/.config/ora/config.toml")
+	dw.println("    or `ORA_STRICT_MACH_LOOKUP=1`. Off by default while per-provider")
+	dw.println("    compatibility against the strict list is being validated.")
 
 	dw.println("")
 	stale := findStaleProfiles(24 * time.Hour)

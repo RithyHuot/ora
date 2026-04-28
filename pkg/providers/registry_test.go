@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/rithyhuot/ora/pkg/proxy"
 )
 
 func TestLookup_AllExpectedProviders(t *testing.T) {
@@ -249,5 +251,108 @@ func TestAllOwnedEnvKeys_DedupsAndSorts(t *testing.T) {
 		if !slices.Contains(fresh, k) {
 			t.Errorf("AllOwnedEnvKeys missing %q; got %v", k, fresh)
 		}
+	}
+}
+
+// TestLookup_OpencodeAllowsRequiredDomains guards opencode's egress set:
+// models.dev (bootstrap catalog), opencode.ai (interactive session
+// resources). Missing any of these makes opencode fail at a different
+// point in its lifecycle, so we assert the full set rather than just one.
+func TestLookup_OpencodeAllowsRequiredDomains(t *testing.T) {
+	spec, ok := Lookup("opencode")
+	if !ok {
+		t.Fatal("opencode not registered")
+	}
+	for _, want := range []string{"models.dev", "opencode.ai", "*.opencode.ai"} {
+		if !slices.Contains(spec.AllowedDomains, want) {
+			t.Errorf("opencode.AllowedDomains missing %q; got %v", want, spec.AllowedDomains)
+		}
+	}
+}
+
+// TestLookup_ClaudeAllowsClaudeAIDomains guards the claude resource-CDN fix:
+// without *.claude.ai in AllowedDomains, claude's startup surfaces
+// `egress.deny host=downloads.claude.ai:443` (CDN fetch).
+func TestLookup_ClaudeAllowsClaudeAIDomains(t *testing.T) {
+	spec, ok := Lookup("claude")
+	if !ok {
+		t.Fatal("claude not registered")
+	}
+	if !slices.Contains(spec.AllowedDomains, "*.claude.ai") {
+		t.Errorf("claude.AllowedDomains = %v; want *.claude.ai present", spec.AllowedDomains)
+	}
+}
+
+// TestLookup_CodexAllowsChatgptSubdomains guards codex's responses-backend
+// connectivity: codex hits ab.chatgpt.com (and likely other chatgpt.com
+// subdomains for telemetry/experimentation). The global default has the
+// apex chatgpt.com but no wildcard.
+func TestLookup_CodexAllowsChatgptSubdomains(t *testing.T) {
+	spec, ok := Lookup("codex")
+	if !ok {
+		t.Fatal("codex not registered")
+	}
+	if !slices.Contains(spec.AllowedDomains, "*.chatgpt.com") {
+		t.Errorf("codex.AllowedDomains = %v; want *.chatgpt.com present", spec.AllowedDomains)
+	}
+}
+
+// TestLookup_ClaudeDisablesTelemetry guards the claude hang fix: claude's
+// synchronous Datadog telemetry blocks the foreground request when the
+// egress proxy denies http-intake.logs.<region>.datadoghq.com. We disable
+// telemetry by default so `ora claude` no longer hangs out of the box.
+func TestLookup_ClaudeDisablesTelemetry(t *testing.T) {
+	spec, ok := Lookup("claude")
+	if !ok {
+		t.Fatal("claude not registered")
+	}
+	if got := spec.EnvDefaults["DISABLE_TELEMETRY"]; got != "1" {
+		t.Errorf("claude.EnvDefaults[\"DISABLE_TELEMETRY\"] = %q; want %q", got, "1")
+	}
+}
+
+// TestBuiltinProviders_AllowedDomainsCanonical guards against drift between
+// the registry's hardcoded entries and proxy.ValidateAllowedDomain. Builtins
+// bypass Register(), so without this test a typo or overly-broad wildcard in
+// a builtin's AllowedDomains would ship silently.
+func TestBuiltinProviders_AllowedDomainsCanonical(t *testing.T) {
+	for _, name := range Names() {
+		spec, _ := Lookup(name)
+		if len(spec.AllowedDomains) == 0 {
+			continue
+		}
+		if _, err := proxy.ValidateAllowedDomains(spec.AllowedDomains); err != nil {
+			t.Errorf("provider %q: AllowedDomains %v failed validation: %v",
+				name, spec.AllowedDomains, err)
+		}
+	}
+}
+
+// TestRegister_RejectsBadAllowedDomains exercises the validation path for
+// out-of-tree providers — overly-broad wildcards and entries with embedded
+// scheme/path must be rejected.
+func TestRegister_RejectsBadAllowedDomains(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name   string
+		domain string
+	}{
+		{"bare-tld-wildcard", "*.com"},
+		{"scheme-included", "https://example.com"},
+		{"path-included", "example.com/v1"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := Register(ProviderSpec{
+				Name:           "bad-allowlist-" + tc.name,
+				BinNames:       []string{"bad-allowlist-" + tc.name},
+				AuthDirsRW:     NoAuth,
+				AllowedDomains: []string{tc.domain},
+			})
+			if err == nil {
+				t.Errorf("Register accepted bad domain %q; should have been rejected", tc.domain)
+				Unregister("bad-allowlist-" + tc.name)
+			}
+		})
 	}
 }
