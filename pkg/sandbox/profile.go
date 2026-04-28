@@ -208,10 +208,17 @@ func emitCapabilityGrants(b *strings.Builder, o ProfileOptions) {
 		line("(allow sysctl-read)")
 	}
 	if o.Policy.StrictMachLookup {
-		// Strict mode: enumerated XPC/Mach service allowlist closes the
-		// "agent can talk to com.apple.securityd / 1Password XPC and bypass
-		// the ~/.config/op, ~/.aws etc. filesystem denies" gap. The list is
-		// the baseline Anthropic empirically validated for Bun-based CLIs in
+		// Strict mode: enumerated XPC/Mach service allowlist. Closes the
+		// "agent can reach 1Password / arbitrary password-manager XPC
+		// daemons" gap (those service names — e.g.
+		// 2BUA8C4S2C.com.1password.1password-helper — are NOT on this list,
+		// so strict mode blocks them). It does NOT block Keychain access:
+		// com.apple.securityd.xpc remains on the allowlist because claude's
+		// OAuth flow (and any provider authenticating via SecItemAdd /
+		// SecItemCopyMatching) needs it. Filesystem denies for ~/.aws,
+		// ~/.config/op, etc. still apply to direct file access — strict
+		// mode tightens the XPC fallback path. The list is the baseline
+		// Anthropic empirically validated for Bun-based CLIs in
 		// anthropic-experimental/sandbox-runtime — known-good for claude.
 		// Off by default (see ProfilePolicy.StrictMachLookup) because other
 		// providers have not yet been profiled against this list.

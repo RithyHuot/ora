@@ -159,12 +159,17 @@ func BuildSpawnEnv(parent []string, proxyPort int, allOwnedKeys, keepKeys []stri
 // that is not already present. User-set values (inherited from parent env)
 // always win over provider defaults.
 //
-// Used by the orchestrator to set provider-recommended env vars after
-// BuildSpawnEnv has done credential stripping and proxy injection. The
-// canonical use case is `DISABLE_TELEMETRY=1` for claude — claude's
-// telemetry to Datadog hangs the foreground request when the egress proxy
-// denies the (non-allowlisted) intake host, so we disable it by default
-// unless the user has explicitly set DISABLE_TELEMETRY themselves.
+// Call order matters: the orchestrator invokes ApplyEnvDefaults on the
+// PARENT env (os.Environ()) BEFORE handing the result to BuildSpawnEnv.
+// Doing it the other way round would let a provider's EnvDefaults entry
+// re-introduce keys that alwaysStripKeys deliberately removed (NODE_OPTIONS,
+// DYLD_INSERT_LIBRARIES, BASH_ENV, PYTHONSTARTUP, …) — bypassing the
+// loader-hook defense. Merging defaults into the parent env first means
+// they go through the same strip pass as inherited env. The canonical use
+// case is `DISABLE_TELEMETRY=1` for claude — claude's telemetry to Datadog
+// hangs the foreground request when the egress proxy denies the
+// (non-allowlisted) intake host, so we disable it by default unless the
+// user has explicitly set DISABLE_TELEMETRY themselves.
 func ApplyEnvDefaults(env []string, defaults map[string]string) []string {
 	if len(defaults) == 0 {
 		return env

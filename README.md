@@ -295,7 +295,7 @@ Each AI CLI stores MCP server config in its own home-dir file. Workspace `.mcp.j
 **1. Install Playwright + the MCP server outside the sandbox once** (so the browser binaries land in `~/Library/Caches/ms-playwright`):
 
 ```sh
-npx -y @playwright/mcp@latest --help     # also fetches browsers on first run
+npx -y @playwright/mcp@0.0.40 --help     # also fetches browsers on first run
 ```
 
 **2. Add the server to the provider's config.**
@@ -306,7 +306,7 @@ claude — `~/.claude.json`:
   "mcpServers": {
     "playwright": {
       "command": "npx",
-      "args": ["-y", "@playwright/mcp@latest"]
+      "args": ["-y", "@playwright/mcp@0.0.40"]
     }
   }
 }
@@ -316,7 +316,7 @@ codex — `~/.codex/config.toml`:
 ```toml
 [mcp_servers.playwright]
 command = "npx"
-args = ["-y", "@playwright/mcp@latest"]
+args = ["-y", "@playwright/mcp@0.0.40"]
 ```
 
 gemini — `~/.gemini/settings.json`:
@@ -325,7 +325,7 @@ gemini — `~/.gemini/settings.json`:
   "mcpServers": {
     "playwright": {
       "command": "npx",
-      "args": ["-y", "@playwright/mcp@latest"]
+      "args": ["-y", "@playwright/mcp@0.0.40"]
     }
   }
 }
@@ -337,19 +337,22 @@ opencode — `~/.config/opencode/opencode.json`:
   "mcp": {
     "playwright": {
       "type": "local",
-      "command": ["npx", "-y", "@playwright/mcp@latest"],
+      "command": ["npx", "-y", "@playwright/mcp@0.0.40"],
       "enabled": true
     }
   }
 }
 ```
 
-**3. Extend ora's policy** so the Playwright cache is writable and the domains the browser needs to reach are allowlisted. Use `~/.config/ora/config.toml` (user-wide) or a project `.ora.toml` (per-repo, requires `ora trust add`):
+**3. Extend ora's policy** so the Playwright cache is writable and the domains the browser needs to reach are allowlisted. Use `~/.config/ora/config.toml` (user-wide) or a project `.ora.toml` (per-repo, requires `ora trust add`).
+
+`extra_writable` paths must be **absolute** — TOML does not expand `~` and `ValidateExtraWritable` rejects relative paths. Substitute your own home dir for `/Users/<you>` below:
 
 ```toml
 [paths]
+# Browser binaries Playwright caches. Absolute path (TOML does not expand ~).
 extra_writable = [
-  "~/Library/Caches/ms-playwright",   # browser binaries Playwright caches
+  "/Users/<you>/Library/Caches/ms-playwright",
 ]
 
 [egress]
@@ -359,6 +362,12 @@ extra_domains = [
   "example.com",
   "*.your-app.com",
 ]
+```
+
+The Playwright cache lives under `$HOME`, which `ValidateExtraWritable` rejects unless you ack the broader exposure. Set the env var below before running ora (this is intentional — `extra_writable` paths inside `$HOME` widen the sandbox more than paths outside it):
+
+```sh
+export ORA_I_UNDERSTAND_HOME_WRITE=1
 ```
 
 **4. Run as usual.**

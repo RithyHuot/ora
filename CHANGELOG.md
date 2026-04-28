@@ -12,15 +12,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `pkg/sandbox.ProfilePolicy.StrictMachLookup bool` (TOML
   `strict_mach_lookup`, env `ORA_STRICT_MACH_LOOKUP`) — opt-in toggle
   that replaces the blanket `(allow mach-lookup)` with an enumerated
-  XPC service allowlist. Closes the long-standing gap where a
-  sandboxed agent could reach `com.apple.securityd` (Keychain
-  `SecItemCopyMatching`) and the 1Password / GUI password-manager XPC
-  daemons even though `~/.config/op`, `~/.aws`, etc. were denied at
-  the filesystem layer. Off by default: the strict allowlist is the
-  Anthropic-validated baseline for Bun-based CLIs but has not yet been
-  empirically profiled against every wrapped provider, and we don't
-  want to break existing flows that rely on services not on the list.
-  `ora doctor` now points at the toggle in its known-gaps note.
+  XPC service allowlist. Closes the gap where a sandboxed agent could
+  reach 1Password / GUI password-manager XPC daemons (those service
+  names are not on the allowlist, so strict mode blocks them) and any
+  other XPC service outside the empirically-validated baseline. Note:
+  Keychain access via `com.apple.securityd.xpc` is intentionally kept
+  on the allowlist because claude's OAuth flow (and any provider using
+  `SecItem*`) requires it — strict mode does NOT block Keychain.
+  Filesystem denies for `~/.aws`, `~/.config/op`, etc. continue to
+  apply to direct file access in both modes; strict mode adds
+  XPC-fallback denial on top. Off by default: the strict allowlist is
+  the Anthropic-validated baseline for Bun-based CLIs but has not yet
+  been empirically profiled against every wrapped provider, and we
+  don't want to break existing flows that rely on services not on the
+  list. `ora doctor` now points at the toggle in its known-gaps note.
 - `pkg/providers.ProviderSpec.AllowedDomains []string` — per-provider
   extension to the global egress allowlist. Some CLIs require domains
   beyond the cross-provider defaults (e.g. opencode dials its catalog at
