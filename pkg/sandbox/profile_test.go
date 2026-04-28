@@ -348,11 +348,22 @@ func TestGenerateProfile_PTYRulesPresent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Three classes of PTY/TTY grant must all appear: open r/w, ioctl
+	// (tcsetattr — Node setRawMode), and pseudo-tty (posix_openpt for
+	// children that allocate their own PTY).
 	for _, want := range []string{
-		`(literal "/dev/ptmx")`,
-		`(literal "/dev/tty")`,
-		`(regex #"^/dev/ttys[0-9]+$")`,
-		`(regex #"^/dev/pts/[0-9]+$")`,
+		// Open + read/write
+		`(allow file-read* file-write* (literal "/dev/ptmx"))`,
+		`(allow file-read* file-write* (literal "/dev/tty"))`,
+		`(allow file-read* file-write* (regex #"^/dev/ttys[0-9]+$"))`,
+		`(allow file-read* file-write* (regex #"^/dev/pts/[0-9]+$"))`,
+		// ioctl — without these, gemini-cli setRawMode dies with EPERM
+		`(allow file-ioctl (literal "/dev/ptmx"))`,
+		`(allow file-ioctl (literal "/dev/tty"))`,
+		`(allow file-ioctl (regex #"^/dev/ttys[0-9]+$"))`,
+		`(allow file-ioctl (regex #"^/dev/pts/[0-9]+$"))`,
+		// posix_openpt and friends
+		`(allow pseudo-tty)`,
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("profile missing PTY rule %q", want)
